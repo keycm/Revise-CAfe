@@ -293,7 +293,7 @@ try {
                             <?php if ($deleted_orders && $deleted_orders->num_rows > 0): ?>
                                 <?php while($row = $deleted_orders->fetch_assoc()): ?>
                                 <tr>
-                                    <td>#<?php echo str_pad($row['order_id'] ?? 0, 4, '0', STR_PAD_LEFT); ?></td>
+                                    <td>#<?php echo str_pad($row['order_id'] ?? $row['id'] ?? 0, 4, '0', STR_PAD_LEFT); ?></td>
                                     <td><strong><?php echo htmlspecialchars($row['fullname'] ?? 'Unknown'); ?></strong></td>
                                     <td style="color:var(--primary-red); font-weight:700;">₱<?php echo number_format($row['total'] ?? 0, 2); ?></td>
                                     <td style="font-size:12px; color:var(--text-muted);">

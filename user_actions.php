@@ -8,7 +8,7 @@ error_reporting(E_ALL);
 
 // 2. Connect to Database using your existing file
 // Make sure your db_connect.php file has the content you just uploaded!
-require_once 'db_connect.php'; 
+require_once 'db_connect.php';
 
 // 3. Include Audit Log
 // We use require_once to ensure the functions are available
@@ -40,7 +40,7 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
 
     // Begin Transaction to ensure data integrity
     $conn->begin_transaction();
-    
+
     try {
         if ($action === 'promote') {
             // Only super_admin can promote
@@ -49,7 +49,7 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
                 $stmt->bind_param("i", $user_id);
                 $stmt->execute();
                 $stmt->close();
-                
+
                 if (function_exists('logAdminAction')) {
                     logAdminAction($conn, $admin_id, $admin_name, 'user_role_change', "Promoted user ID #{$user_id} to admin", 'users', $user_id);
                 }
@@ -61,7 +61,7 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
                 $stmt->bind_param("i", $user_id);
                 $stmt->execute();
                 $stmt->close();
-                
+
                 if (function_exists('logAdminAction')) {
                     logAdminAction($conn, $admin_id, $admin_name, 'user_role_change', "Demoted user ID #{$user_id} to user", 'users', $user_id);
                 }
@@ -81,33 +81,44 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
                      throw new Exception("Admin cannot delete Super Admin.");
                 }
 
-                // 2. Insert into the recently_deleted_users table (Recycle Bin)
-                // Note: We use NOW() for the deleted_at timestamp
-                $insert_stmt = $conn->prepare("INSERT INTO recently_deleted_users (fullname, username, email, role, deleted_at) VALUES (?, ?, ?, ?, NOW())");
-                if (!$insert_stmt) {
-                    // Create table if it doesn't exist (Backup plan)
-                    $conn->query("CREATE TABLE IF NOT EXISTS recently_deleted_users (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        fullname VARCHAR(255),
-                        username VARCHAR(255),
-                        email VARCHAR(255),
-                        role VARCHAR(50),
-                        deleted_at DATETIME
-                    )");
-                    $insert_stmt = $conn->prepare("INSERT INTO recently_deleted_users (fullname, username, email, role, deleted_at) VALUES (?, ?, ?, ?, NOW())");
+                // --- ROBUST RECYCLE BIN LOGIC ---
+                $target_table = 'recently_deleted_users';
+
+                // A. Ensure table exists (Clone structure)
+                $conn->query("CREATE TABLE IF NOT EXISTS `$target_table` LIKE users");
+
+                // B. Ensure 'deleted_at' column exists
+                $cols = $conn->query("SHOW COLUMNS FROM `$target_table` LIKE 'deleted_at'");
+                if ($cols->num_rows == 0) {
+                    $conn->query("ALTER TABLE `$target_table` ADD COLUMN deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP");
                 }
-                
-                $insert_stmt->bind_param("ssss", $user['fullname'], $user['username'], $user['email'], $user['role']);
-                if (!$insert_stmt->execute()) {
-                    throw new Exception("Failed to backup user to recycle bin: " . $insert_stmt->error);
+
+                // C. Copy record with ALL columns dynamically
+                // Get columns from 'users' table to build the query
+                $columns = [];
+                $res = $conn->query("SHOW COLUMNS FROM users");
+                while ($row = $res->fetch_assoc()) {
+                    $columns[] = "`" . $row['Field'] . "`";
                 }
-                $insert_stmt->close();
+                $col_list = implode(", ", $columns);
+
+                // Insert into recycle bin
+                $copy_sql = "INSERT INTO `$target_table` ($col_list, deleted_at) SELECT $col_list, NOW() FROM users WHERE id = ?";
+                $stmt_copy = $conn->prepare($copy_sql);
+                if (!$stmt_copy) {
+                     throw new Exception("Prepare failed: " . $conn->error);
+                }
+                $stmt_copy->bind_param("i", $user_id);
+                if (!$stmt_copy->execute()) {
+                    throw new Exception("Failed to move user to recycle bin: " . $stmt_copy->error);
+                }
+                $stmt_copy->close();
 
                 // 3. Delete from the main users table
                 $delete_stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
                 $delete_stmt->bind_param("i", $user_id);
                 if (!$delete_stmt->execute()) {
-                    throw new Exception("Failed to delete user.");
+                    throw new Exception("Failed to delete user from main table.");
                 }
                 $delete_stmt->close();
 
@@ -127,7 +138,7 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
                 throw new Exception("User not found.");
             }
         }
-        
+
         $conn->commit();
         header("Location: user_accounts.php?success=user_deleted");
 

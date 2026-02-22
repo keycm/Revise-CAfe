@@ -36,26 +36,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $row = $res->fetch_assoc();
             $sel->close();
 
-            // 2) Insert into recently_deleted
-            $ins_sql = "
-                INSERT INTO recently_deleted
-                (order_id, fullname, contact, address, total, created_at, status, cart)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ";
-            $ins = $conn->prepare($ins_sql);
+            // 2) --- ROBUST RECYCLE BIN LOGIC ---
+            $target_table = 'recently_deleted';
+
+            // A. Ensure table exists (Clone structure)
+            $conn->query("CREATE TABLE IF NOT EXISTS `$target_table` LIKE cart");
+
+            // B. Ensure 'deleted_at' column exists
+            $cols = $conn->query("SHOW COLUMNS FROM `$target_table` LIKE 'deleted_at'");
+            if ($cols->num_rows == 0) {
+                $conn->query("ALTER TABLE `$target_table` ADD COLUMN deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+            }
+
+            // C. Copy record with ALL columns dynamically
+            // Get columns from 'cart' table
+            $columns = [];
+            $res_cols = $conn->query("SHOW COLUMNS FROM cart");
+            while ($c = $res_cols->fetch_assoc()) {
+                $columns[] = "`" . $c['Field'] . "`";
+            }
+            $col_list = implode(", ", $columns);
+
+            // Insert into recycle bin
+            $copy_sql = "INSERT INTO `$target_table` ($col_list, deleted_at) SELECT $col_list, NOW() FROM cart WHERE id = ?";
+            $ins = $conn->prepare($copy_sql);
             if (!$ins) throw new Exception("Prepare INSERT recently_deleted failed: " . $conn->error);
 
-            $ins->bind_param(
-                "isssdsss",
-                $row['id'],
-                $row['fullname'],
-                $row['contact'],
-                $row['address'],
-                $row['total'],
-                $row['created_at'],
-                $row['status'],
-                $row['cart']
-            );
+            $ins->bind_param("i", $id);
             if (!$ins->execute()) {
                 $ins->close();
                 throw new Exception("Execute INSERT failed: " . $ins->error);
@@ -82,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sel->execute();
             $order = $sel->get_result()->fetch_assoc();
             $sel->close();
-            
+
             $cart_json = $order['cart'] ?? null;
 
             if ($cart_json) {
@@ -116,18 +123,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $up->close();
 
             $conn->commit();
-            
+
             // Log audit
             logAdminAction(
                 $user_conn,
                 $_SESSION['user_id'] ?? 0,
                 $_SESSION['fullname'] ?? 'Admin',
-                'order_cancel', 
+                'order_cancel',
                 "Cancelled order #$id (Customer: {$order['fullname']})",
                 'cart',
                 $id
             );
-            
+
             // Create notification for cancelled order
             if (isset($order['user_id']) && $order['user_id']) {
                 createNotification(
@@ -148,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sel->execute();
             $order = $sel->get_result()->fetch_assoc();
             $sel->close();
-            
+
             // Update status to Confirmed
             $up = $conn->prepare("UPDATE cart SET status = 'Confirmed' WHERE id = ?");
             if (!$up) throw new Exception("Prepare UPDATE accept failed: " . $conn->error);
@@ -158,9 +165,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("Execute UPDATE accept failed: " . $up->error);
             }
             $up->close();
-            
+
             $conn->commit();
-            
+
             // Log audit
             logAdminAction(
                 $user_conn,
@@ -171,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'cart',
                 $id
             );
-            
+
             // Create notification for accepted/confirmed order
             if (isset($order['user_id']) && $order['user_id']) {
                 createNotification(
@@ -296,7 +303,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ins_rev->close();
 
             $conn->commit();
-            
+
             // Log audit
             logAdminAction(
                 $user_conn,
@@ -307,7 +314,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'cart',
                 $id
             );
-            
+
             // Create notification for completed order
             if (isset($order['user_id']) && $order['user_id']) {
                 createNotification(
