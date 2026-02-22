@@ -81,22 +81,22 @@ if (!$deleted_users) {
         }
 
         /* --- LAYOUT FIX --- */
-        .main-content { 
+        .main-content {
             flex-grow: 1;
             margin-left: 260px;
-            width: calc(100% - 260px); 
+            width: calc(100% - 260px);
             height: 100vh;
             overflow-y: auto;
             padding: 40px;
         }
 
-        .main-header { 
+        .main-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
         }
-        
+
         .main-header h1 { font-family: var(--font-heading); font-size: 28px; font-weight: 700; }
 
         /* --- HEADER ICONS --- */
@@ -165,14 +165,14 @@ if (!$deleted_users) {
         }
         td { padding: 15px; border-bottom: 1px solid var(--border-color); font-size: 14px; vertical-align: middle; }
         tr:hover { background-color: #fcfcfc; }
-        
+
         .empty-state { padding: 20px; text-align: center; color: var(--text-muted); font-style: italic; }
         .error-state { padding: 20px; color: var(--primary-red); background: #fff0f0; border-radius: 8px; margin-bottom: 15px; }
 
         /* --- ACTION BUTTONS --- */
         .action-icons { display: flex; gap: 8px; }
-        .btn-icon { 
-            width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; 
+        .btn-icon {
+            width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
             border: 1px solid var(--border-color); background: white; cursor: pointer; transition: 0.2s; color: var(--text-muted);
             text-decoration: none;
         }
@@ -221,7 +221,14 @@ if (!$deleted_users) {
                         <?php endif; ?>
                     </div>
                 </div>
-                <div class="icon-container" id="notificationBell"><i class="fas fa-bell"></i></div>
+
+                <div class="icon-container" id="notificationBell">
+                    <i class="fas fa-bell"></i>
+                    <div class="dropdown-menu" id="notificationDropdown">
+                        <div class="dropdown-item">No new notifications</div>
+                    </div>
+                </div>
+
                 <div class="icon-container" id="profileIcon" style="border:none;">
                     <img src="logo.png" alt="Admin">
                     <div class="dropdown-menu" id="profileDropdown" style="width:150px;">
