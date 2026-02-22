@@ -28,25 +28,45 @@ try {
         }
     }
 
+    // --- HELPER FUNCTION FOR ROBUST QUERYING ---
+    function fetch_deleted_data($conn, $table) {
+        // Check if table exists
+        $check = $conn->query("SHOW TABLES LIKE '$table'");
+        if (!$check || $check->num_rows == 0) return null;
+
+        // Check for 'deleted_at' column
+        $cols = $conn->query("SHOW COLUMNS FROM `$table` LIKE 'deleted_at'");
+        $order_col = ($cols && $cols->num_rows > 0) ? 'deleted_at' : 'id';
+
+        // Check for 'id' column as fallback for ordering
+        if ($order_col === 'id') {
+            $cols_id = $conn->query("SHOW COLUMNS FROM `$table` LIKE 'id'");
+            if (!$cols_id || $cols_id->num_rows == 0) {
+                // If neither deleted_at nor id exists, just select without order
+                return $conn->query("SELECT * FROM `$table` LIMIT 50");
+            }
+        }
+
+        $sql = "SELECT * FROM `$table` ORDER BY `$order_col` DESC LIMIT 50";
+        return $conn->query($sql);
+    }
+
     // --- DATA FETCHING WITH CRASH PROTECTION ---
 
     // 1. Fetch Deleted Orders
-    $orders_sql = "SELECT * FROM recently_deleted ORDER BY deleted_at DESC LIMIT 50";
-    $deleted_orders = $local_conn->query($orders_sql);
+    $deleted_orders = fetch_deleted_data($local_conn, 'recently_deleted');
     if (!$deleted_orders) {
         $orders_error = $local_conn->error;
     }
 
     // 2. Fetch Deleted Products
-    $products_sql = "SELECT * FROM recently_deleted_products ORDER BY deleted_at DESC LIMIT 50";
-    $deleted_products = $local_conn->query($products_sql);
+    $deleted_products = fetch_deleted_data($local_conn, 'recently_deleted_products');
     if (!$deleted_products) {
         $products_error = $local_conn->error;
     }
 
     // 3. Fetch Deleted Users
-    $users_sql = "SELECT * FROM recently_deleted_users ORDER BY deleted_at DESC LIMIT 50";
-    $deleted_users = $local_conn->query($users_sql);
+    $deleted_users = fetch_deleted_data($local_conn, 'recently_deleted_users');
     if (!$deleted_users) {
         $users_error = $local_conn->error;
     }
@@ -273,10 +293,12 @@ try {
                             <?php if ($deleted_orders && $deleted_orders->num_rows > 0): ?>
                                 <?php while($row = $deleted_orders->fetch_assoc()): ?>
                                 <tr>
-                                    <td>#<?php echo str_pad($row['order_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                                    <td><strong><?php echo htmlspecialchars($row['fullname']); ?></strong></td>
-                                    <td style="color:var(--primary-red); font-weight:700;">₱<?php echo number_format($row['total'], 2); ?></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td>#<?php echo str_pad($row['order_id'] ?? 0, 4, '0', STR_PAD_LEFT); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['fullname'] ?? 'Unknown'); ?></strong></td>
+                                    <td style="color:var(--primary-red); font-weight:700;">₱<?php echo number_format($row['total'] ?? 0, 2); ?></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
                                             <a href="restore_delete.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
@@ -315,10 +337,12 @@ try {
                             <?php if ($deleted_products && $deleted_products->num_rows > 0): ?>
                                 <?php while($row = $deleted_products->fetch_assoc()): ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                    <td>₱<?php echo number_format($row['price'], 2); ?></td>
-                                    <td><span style="font-size:11px; background:#eee; padding:2px 8px; border-radius:4px;"><?php echo htmlspecialchars($row['category']); ?></span></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['name'] ?? 'Unknown'); ?></strong></td>
+                                    <td>₱<?php echo number_format($row['price'] ?? 0, 2); ?></td>
+                                    <td><span style="font-size:11px; background:#eee; padding:2px 8px; border-radius:4px;"><?php echo htmlspecialchars($row['category'] ?? 'Uncategorized'); ?></span></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
                                             <a href="restore_delete_product.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
@@ -357,10 +381,12 @@ try {
                             <?php if ($deleted_users && $deleted_users->num_rows > 0): ?>
                                 <?php while($row = $deleted_users->fetch_assoc()): ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($row['fullname']); ?></strong></td>
-                                    <td style="color:var(--text-muted);"><?php echo htmlspecialchars($row['email']); ?></td>
-                                    <td><span style="font-size:11px; text-transform:uppercase; font-weight:700;"><?php echo $row['role']; ?></span></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['fullname'] ?? 'Unknown'); ?></strong></td>
+                                    <td style="color:var(--text-muted);"><?php echo htmlspecialchars($row['email'] ?? 'Unknown'); ?></td>
+                                    <td><span style="font-size:11px; text-transform:uppercase; font-weight:700;"><?php echo $row['role'] ?? 'User'; ?></span></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
                                             <a href="user_restore_actions.php?action=restore&id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
