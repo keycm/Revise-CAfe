@@ -1,50 +1,58 @@
 <?php
-include 'session_check.php';
-include 'db_connect.php';
+try {
+    include 'session_check.php';
+    include 'db_connect.php';
 
-// --- ACCESS CONTROL FIX ---
-// Allow both 'admin' and 'super_admin' to access this page
-if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['admin', 'super_admin'])) {
-    header("Location: Dashboard.php");
-    exit();
-}
-
-// --- DATA FOR HEADER ICONS ---
-$unread_inquiries = 0;
-$inquiry_count_result = $conn->query("SELECT COUNT(*) as count FROM inquiries WHERE status = 'new'");
-if ($inquiry_count_result) {
-    $unread_inquiries = $inquiry_count_result->fetch_assoc()['count'];
-}
-
-$recent_messages = [];
-$recent_inquiries_result = $conn->query("SELECT * FROM inquiries WHERE status = 'new' ORDER BY received_at DESC LIMIT 5");
-if ($recent_inquiries_result) {
-    while ($row = $recent_inquiries_result->fetch_assoc()) {
-        $recent_messages[] = $row;
+    // --- ACCESS CONTROL FIX ---
+    // Allow both 'admin' and 'super_admin' to access this page
+    if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['admin', 'super_admin'])) {
+        header("Location: Dashboard.php");
+        exit();
     }
-}
 
-// --- DATA FETCHING WITH CRASH PROTECTION ---
+    // Isolate connection for local use to avoid conflicts with later includes (like config.php in sidebar)
+    $local_conn = $conn;
 
-// 1. Fetch Deleted Orders
-$orders_sql = "SELECT * FROM recently_deleted ORDER BY deleted_at DESC";
-$deleted_orders = $conn->query($orders_sql);
-if (!$deleted_orders) {
-    $orders_error = $conn->error;
-}
+    // --- DATA FOR HEADER ICONS ---
+    $unread_inquiries = 0;
+    $inquiry_count_result = $local_conn->query("SELECT COUNT(*) as count FROM inquiries WHERE status = 'new'");
+    if ($inquiry_count_result) {
+        $unread_inquiries = $inquiry_count_result->fetch_assoc()['count'];
+    }
 
-// 2. Fetch Deleted Products
-$products_sql = "SELECT * FROM recently_deleted_products ORDER BY deleted_at DESC";
-$deleted_products = $conn->query($products_sql);
-if (!$deleted_products) {
-    $products_error = $conn->error;
-}
+    $recent_messages = [];
+    $recent_inquiries_result = $local_conn->query("SELECT * FROM inquiries WHERE status = 'new' ORDER BY received_at DESC LIMIT 5");
+    if ($recent_inquiries_result) {
+        while ($row = $recent_inquiries_result->fetch_assoc()) {
+            $recent_messages[] = $row;
+        }
+    }
 
-// 3. Fetch Deleted Users
-$users_sql = "SELECT * FROM recently_deleted_users ORDER BY deleted_at DESC";
-$deleted_users = $conn->query($users_sql);
-if (!$deleted_users) {
-    $users_error = $conn->error;
+    // --- DATA FETCHING WITH CRASH PROTECTION ---
+
+    // 1. Fetch Deleted Orders
+    $orders_sql = "SELECT * FROM recently_deleted ORDER BY deleted_at DESC LIMIT 50";
+    $deleted_orders = $local_conn->query($orders_sql);
+    if (!$deleted_orders) {
+        $orders_error = $local_conn->error;
+    }
+
+    // 2. Fetch Deleted Products
+    $products_sql = "SELECT * FROM recently_deleted_products ORDER BY deleted_at DESC LIMIT 50";
+    $deleted_products = $local_conn->query($products_sql);
+    if (!$deleted_products) {
+        $products_error = $local_conn->error;
+    }
+
+    // 3. Fetch Deleted Users
+    $users_sql = "SELECT * FROM recently_deleted_users ORDER BY deleted_at DESC LIMIT 50";
+    $deleted_users = $local_conn->query($users_sql);
+    if (!$deleted_users) {
+        $users_error = $local_conn->error;
+    }
+
+} catch (Throwable $e) {
+    die("Error initializing page: " . htmlspecialchars($e->getMessage()));
 }
 ?>
 <!DOCTYPE html>
@@ -248,7 +256,7 @@ if (!$deleted_users) {
             <div id="orders" class="tab-content active">
                 <?php if (isset($orders_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -262,7 +270,7 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_orders->num_rows > 0): ?>
+                            <?php if ($deleted_orders && $deleted_orders->num_rows > 0): ?>
                                 <?php while($row = $deleted_orders->fetch_assoc()): ?>
                                 <tr>
                                     <td>#<?php echo str_pad($row['order_id'], 4, '0', STR_PAD_LEFT); ?></td>
@@ -277,8 +285,10 @@ if (!$deleted_users) {
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_orders): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted orders found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load orders.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -288,7 +298,7 @@ if (!$deleted_users) {
             <div id="products" class="tab-content">
                 <?php if (isset($products_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_products' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_products' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -302,7 +312,7 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_products->num_rows > 0): ?>
+                            <?php if ($deleted_products && $deleted_products->num_rows > 0): ?>
                                 <?php while($row = $deleted_products->fetch_assoc()): ?>
                                 <tr>
                                     <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
@@ -317,8 +327,10 @@ if (!$deleted_users) {
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_products): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted products found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load products.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -328,7 +340,7 @@ if (!$deleted_users) {
             <div id="users" class="tab-content">
                 <?php if (isset($users_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_users' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_users' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -342,7 +354,7 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_users->num_rows > 0): ?>
+                            <?php if ($deleted_users && $deleted_users->num_rows > 0): ?>
                                 <?php while($row = $deleted_users->fetch_assoc()): ?>
                                 <tr>
                                     <td><strong><?php echo htmlspecialchars($row['fullname']); ?></strong></td>
@@ -357,8 +369,10 @@ if (!$deleted_users) {
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_users): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted users found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load users.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
