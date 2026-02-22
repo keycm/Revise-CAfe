@@ -14,7 +14,7 @@ if (!isset($conn) || $conn->connect_error) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $id = $_POST['id'];
+    $id = intval($_POST['id']);
     $action = $_POST['action'];
 
     // Get the record from recently_deleted (orders)
@@ -26,22 +26,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($row = $result->fetch_assoc()) {
         if ($action === 'restore') {
-            // Restore back to 'cart' table (based on your code)
-            // Make sure the columns here match your current 'cart' table structure
-            $insert_sql = "INSERT INTO cart (fullname, contact, address, cart, total, status) VALUES (?, ?, ?, ?, ?, ?)";
-            $insert_stmt = $conn->prepare($insert_sql);
-            
+            // Restore back to 'cart' table using dynamic column mapping
+            // This ensures we copy all columns, including new ones like 'user_id'
+
+            // Get columns from 'cart' table
+            $columns = [];
+            $res = $conn->query("SHOW COLUMNS FROM cart");
+            while ($c = $res->fetch_assoc()) {
+                // Include 'id' to preserve original ID and maintain relationships
+                $columns[] = "`" . $c['Field'] . "`";
+            }
+
+            // Build query dynamically
+            $col_names = [];
+            $placeholders = [];
+            $types = "";
+            $values = [];
+
+            foreach ($columns as $quoted_col) {
+                $col = trim($quoted_col, "`");
+                // Check if the column exists in the source row or map from order_id to id
+                if (array_key_exists($col, $row)) {
+                    $col_names[] = $quoted_col;
+                    $placeholders[] = "?";
+                    $values[] = $row[$col];
+                    $types .= "s";
+                } elseif ($col === 'id' && array_key_exists('order_id', $row)) {
+                    // Map 'order_id' from recently_deleted back to 'id' in cart
+                    $col_names[] = "`id`";
+                    $placeholders[] = "?";
+                    $values[] = $row['order_id'];
+                    $types .= "i";
+                }
+            }
+
+            $sql_insert = "INSERT INTO cart (" . implode(", ", $col_names) . ") VALUES (" . implode(", ", $placeholders) . ")";
+            $insert_stmt = $conn->prepare($sql_insert);
+
             if ($insert_stmt) {
-                $insert_stmt->bind_param(
-                    "ssssds",
-                    $row['fullname'],
-                    $row['contact'],
-                    $row['address'],
-                    $row['cart'],
-                    $row['total'],
-                    $row['status']
-                );
-                
+                $insert_stmt->bind_param($types, ...$values);
+
                 if ($insert_stmt->execute()) {
                     $insert_stmt->close();
 
@@ -58,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 die("Error preparing restore: " . $conn->error);
             }
 
-        } elseif ($action === 'permanent') {
+        } elseif ($action === 'permanent_delete') {
             // Permanently delete
             $delete_sql = "DELETE FROM recently_deleted WHERE id = ?";
             $delete_stmt = $conn->prepare($delete_sql);

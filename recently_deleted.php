@@ -301,8 +301,16 @@ try {
                                     </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="restore_delete.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="recently_deleted_action.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Permanent delete cannot be undone. Proceed?');"><i class="fas fa-trash"></i></a>
+                                            <form action="restore_delete.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="restore_delete.php" method="POST" style="display:inline;" onsubmit="return confirm('Permanent delete cannot be undone. Proceed?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
@@ -345,8 +353,16 @@ try {
                                     </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="restore_delete_product.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="product_actions.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Delete product permanently?');"><i class="fas fa-trash"></i></a>
+                                            <form action="restore_delete_product.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="restore_delete_product.php" method="POST" style="display:inline;" onsubmit="return confirm('Delete product permanently?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
@@ -389,8 +405,16 @@ try {
                                     </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="user_restore_actions.php?action=restore&id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="user_restore_actions.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Delete user account permanently?');"><i class="fas fa-trash"></i></a>
+                                            <form action="user_restore_actions.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="user_restore_actions.php" method="POST" style="display:inline;" onsubmit="return confirm('Delete user account permanently?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
