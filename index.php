@@ -55,7 +55,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_otp'])) {
                 $verifyStmt->close();
             }
             
-            // FIXED: Using profile_picture to match SQL schema
             $userStmt = $conn->prepare("SELECT fullname, role, profile_picture FROM users WHERE id = ?");
             $userStmt->bind_param('i', $userId);
             $userStmt->execute();
@@ -109,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     $_SESSION['email'] = $user['email']; 
                     $_SESSION['fullname'] = $user['fullname'];
                     $_SESSION['role'] = $user['role'];
-                    $_SESSION['profile_pic'] = $user['profile_picture'] ?? null; // FIXED: Changed from profile_pic
+                    $_SESSION['profile_pic'] = $user['profile_picture'] ?? null; 
                     
                     audit($user['id'], 'login_success', 'users', $user['id'], []);
                     
@@ -188,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                 $otpStmt->close();
                 
                 $subject = "Welcome! Verify your Cafe Emmanuel Account";
-                $body = "<div style='color:#333;'><h1>Welcome, $fullname!</h1><p>Verify your account using code: <b style='font-size:24px; color:#B95A4B;'>$code</b></p></div>";
+                $body = "<div style='color:#333;'><h1>Welcome, $fullname!</h1><p>Verify your account using code: <b style='font-size:24px; color:#A05E44;'>$code</b></p></div>";
                 send_email($email, $subject, $body);
 
                 $_SESSION['otp_user_id'] = $new_user_id;
@@ -208,59 +207,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     }
 }
 
-// --- Fetch Menu Items (FIXED CATEGORIES TO MATCH SQL DUMP) ---
-$coffee_items = $food_items = $sandwich_items = [];
-if (isset($conn) && !$conn->connect_error) {
-    // coffee -> over iced
-    $coffee_result = $conn->query("SELECT * FROM products WHERE category = 'over iced' AND stock > 0 ORDER BY id DESC LIMIT 4");
-    $coffee_items = $coffee_result ? $coffee_result->fetch_all(MYSQLI_ASSOC) : [];
-
-    // pizza -> pizza
-    $food_result = $conn->query("SELECT * FROM products WHERE category = 'pizza' AND stock > 0 ORDER BY id DESC LIMIT 4");
-    $food_items = $food_result ? $food_result->fetch_all(MYSQLI_ASSOC) : [];
-
-    // sandwich -> All Day Breakfast
-    $sandwich_result = $conn->query("SELECT * FROM products WHERE category = 'All Day Breakfast' AND stock > 0 ORDER BY id DESC LIMIT 4");
-    $sandwich_items = $sandwich_result ? $sandwich_result->fetch_all(MYSQLI_ASSOC) : [];
-}
-
-// =========================================================
-// FETCH HERO SLIDES (UPDATED LOGIC: VIDEO FIRST)
-// =========================================================
+// ---------------------------------------------------------
+// FETCH DATA (HERO SLIDES & FULL MENU)
+// ---------------------------------------------------------
 $video_slide = null;
 $image_slides = [];
 
-// 1. Get the Video (Limit 1)
 $vid_sql = "SELECT * FROM hero_slides WHERE type = 'video' ORDER BY sort_order ASC LIMIT 1";
 $vid_res = $conn->query($vid_sql);
-if ($vid_res && $vid_res->num_rows > 0) {
-    $video_slide = $vid_res->fetch_assoc();
-}
+if ($vid_res && $vid_res->num_rows > 0) { $video_slide = $vid_res->fetch_assoc(); }
 
-// 2. Get Images
 $img_sql = "SELECT * FROM hero_slides WHERE type = 'image' ORDER BY sort_order ASC";
 $img_res = $conn->query($img_sql);
-if ($img_res) {
-    while ($row = $img_res->fetch_assoc()) {
-        $image_slides[] = $row;
-    }
-}
+if ($img_res) { while ($row = $img_res->fetch_assoc()) { $image_slides[] = $row; } }
 
-// 3. Merge: Video is ALWAYS index 0 (if exists)
 $hero_slides = [];
 if ($video_slide) $hero_slides[] = $video_slide;
 foreach ($image_slides as $img) $hero_slides[] = $img;
 
-// Fallback if completely empty
 if (empty($hero_slides)) {
     $hero_slides[] = [
         'type' => 'image',
         'file_path' => 'Cover-Photo.jpg',
-        'heading' => 'Welcome to <span>Cafe</span>Emmanuel',
+        'heading' => 'Welcome to Cafe Emmanuel',
         'subtext' => 'Roasting with Art. Taste the difference.',
-        'button_text' => 'View Menu',
-        'button_link' => 'product.php'
+        'button_text' => 'Explore Menu',
+        'button_link' => '#menu'
     ];
+}
+
+$all_products = [];
+$product_res = $conn->query("SELECT * FROM products WHERE stock > 0 ORDER BY category, name");
+if ($product_res) {
+    while ($row = $product_res->fetch_assoc()) {
+        $all_products[] = $row;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -268,207 +249,340 @@ if (empty($hero_slides)) {
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="logo.png">
-    <title>Cafe Emmanuel - Roasting with Art</title>
+    <link rel="icon" type="image/png" href="Logo_Brand.png">
+    <title>Cafe Emmanuel - A Symphony of Taste</title>
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Akaya+Telivigala&family=Archivo+Black&family=Archivo+Narrow:wght@400;700&family=Birthstone+Bounce:wght@500&family=Inknut+Antiqua:wght@600&family=Playfair+Display:wght@700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
+        /* ================== ROOT VARIABLES ================== */
         :root {
-            --primary-color: #B95A4B;
-            --primary-dark: #9C4538;
-            --secondary-color: #3C2A21;
-            --text-color: #333;
-            --heading-color: #1F1F1F;
-            --white: #FFFFFF;
-            --bg-light: #FCFBF8;
-            --border-color: #EAEAEA;
-            --footer-bg-color: #1a120b;
-            --footer-text-color: #ccc;
-            --footer-link-hover: #FFC94A;
-            --font-logo-cafe: 'Archivo Black', sans-serif;
-            --font-logo-emmanuel: 'Birthstone Bounce', cursive;
-            --font-nav: 'Inknut Antiqua', serif;
-            --font-hero: 'Akaya Telivigala', cursive;
+            /* Rich Coffee Brown Theme */
+            --primary: #A05E44;       /* Warm Caramel / Cinnamon */
+            --primary-hover: #804832;
+            --primary-glow: rgba(160, 94, 68, 0.4);
+            
+            --secondary: #2C1E16;     /* Deep Espresso */
+            --accent: #D4A373;        /* Warm Latte */
+            
+            --bg-main: #F8F4EE;       /* Creamy Latte Foam */
+            --bg-card: #FFFFFF;
+            
+            --text-dark: #3A2B24;
+            --text-muted: #756358;
+            
             --font-heading: 'Playfair Display', serif;
-            --font-body: 'Lato', sans-serif;
-            --nav-height: 90px;
+            --font-body: 'Poppins', sans-serif;
+            
+            --nav-height-top: 140px;      /* Very large top nav */
+            --nav-height-scrolled: 80px;  /* Compact scrolled nav */
+            
+            --radius-lg: 24px;
+            --radius-md: 16px;
+            --radius-sm: 8px;
+            
+            --shadow-soft: 0 10px 40px rgba(44, 30, 22, 0.06);
+            --shadow-hover: 0 20px 40px rgba(160, 94, 68, 0.15);
         }
 
+        /* ================== GLOBAL STYLES ================== */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html { scroll-behavior: smooth; scroll-padding-top: var(--nav-height); }
-        body { font-family: var(--font-body); color: var(--text-color); background-color: var(--bg-light); line-height: 1.7; overflow-x: hidden; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-        a { text-decoration: none; transition: 0.3s; color: inherit; }
+        html { scroll-behavior: smooth; scroll-padding-top: var(--nav-height-scrolled); }
+        body { font-family: var(--font-body); color: var(--text-dark); background-color: var(--bg-main); line-height: 1.7; overflow-x: hidden; }
+        .container { max-width: 1280px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 2; }
+        a { text-decoration: none; color: inherit; transition: all 0.3s ease; }
         ul { list-style: none; }
-        .btn { display: inline-block; padding: 12px 30px; border-radius: 50px; font-weight: 700; font-size: 1rem; text-align: center; cursor: pointer; transition: all 0.3s ease; border: 2px solid transparent; font-family: var(--font-body); }
-        .btn-primary { background-color: var(--primary-color); color: var(--white); box-shadow: 0 4px 15px rgba(185, 90, 75, 0.3); }
-        .btn-primary:hover { background-color: var(--primary-dark); transform: translateY(-2px); }
-        .btn-outline { background-color: transparent; color: var(--white); border-color: var(--white); }
-        .btn-outline:hover { background-color: var(--white); color: var(--secondary-color); }
-        .header { position: fixed; width: 100%; top: 0; z-index: 1000; height: var(--nav-height); background: transparent; transition: background 0.4s ease, box-shadow 0.4s ease; }
-        .header.scrolled { background: rgba(26, 18, 11, 0.98); box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        .navbar { display: flex; justify-content: space-between; align-items: center; height: 100%; }
-        .nav-logo { display: flex; align-items: center; color: var(--white); }
-        .logo-cafe { font-family: var(--font-logo-cafe); font-size: 32px; letter-spacing: -1px; }
-        .logo-emmanuel { font-family: var(--font-logo-emmanuel); font-size: 38px; margin-left: 8px; color: var(--primary-color); font-weight: 500; }
-        .nav-menu { display: flex; gap: 2.5rem; }
-        .nav-link { font-family: var(--font-nav); font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.9); position: relative; letter-spacing: 0.5px; }
-        .nav-link::after { content: ''; position: absolute; width: 0; height: 2px; bottom: -4px; left: 0; background-color: var(--footer-link-hover); transition: width 0.3s; }
-        .nav-link:hover::after, .nav-link.active::after { width: 100%; }
-        .nav-link:hover, .nav-link.active { color: var(--footer-link-hover); }
-        .nav-right-cluster { display: flex; align-items: center; gap: 1rem; }
-        .nav-icon-btn { position: relative; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255, 255, 255, 0.1); color: var(--white); font-size: 1.1rem; transition: all 0.3s ease; }
-        .nav-icon-btn:hover { background: var(--footer-link-hover); color: var(--secondary-color); transform: translateY(-2px); }
-        .user-avatar { width: 45px; height: 45px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-color); transition: transform 0.3s ease; background: #fff; }
-        .profile-dropdown:hover .user-avatar { transform: scale(1.05); box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); }
-        .login-trigger { background: var(--primary-color); color: var(--white); padding: 8px 24px; border-radius: 30px; font-weight: 600; font-size: 0.9rem; border: none; cursor: pointer; transition: background 0.3s; }
-        .login-trigger:hover { background: var(--primary-dark); }
-        .profile-dropdown { position: relative; cursor: pointer; display: flex; align-items: center;}
-        .profile-dropdown::after { content: ''; position: absolute; top: 100%; left: 0; width: 100%; height: 50px; background: transparent; }
-        .profile-menu { display: none; position: absolute; right: 0; top: 140%; background: var(--white); min-width: 200px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); overflow: hidden; z-index: 1001; }
-        .profile-dropdown:hover .profile-menu { display: block; }
-        .profile-menu a { display: block; padding: 12px 20px; color: var(--text-color); font-size: 0.95rem; border-bottom: 1px solid var(--border-color); }
-        .profile-menu a:hover { background: #f8f9fa; color: var(--primary-color); }
-        .hamburger { display: none; cursor: pointer; }
-        .bar { display: block; width: 25px; height: 3px; margin: 5px auto; background-color: var(--white); transition: 0.3s; }
-        .hero-section { position: relative; height: 100vh; width: 100%; overflow: hidden; display: flex; align-items: center; justify-content: flex-start; }
-        .hero-slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-size: cover; background-position: center; opacity: 0; transition: opacity 1s ease-in-out; z-index: 0; }
+        
+        /* Smooth Reveal Animation */
+        .reveal { opacity: 0; transform: translateY(40px); transition: all 0.8s cubic-bezier(0.5, 0, 0, 1); }
+        .reveal.active { opacity: 1; transform: translateY(0); }
+
+        /* Buttons */
+        .btn { display: inline-flex; align-items: center; justify-content: center; padding: 14px 32px; border-radius: 50px; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); border: none; gap: 8px; position: relative; overflow: hidden; z-index: 1; }
+        .btn::before { content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%; background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%); transform: skewX(-25deg); transition: all 0.5s; z-index: -1; }
+        .btn:hover::before { left: 200%; }
+        .btn-primary { background: linear-gradient(135deg, var(--primary), #D4A373); color: #fff; box-shadow: 0 8px 25px var(--primary-glow); }
+        .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 12px 30px var(--primary-glow); }
+        .btn-outline { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,0.8); }
+        .btn-outline:hover { background: #fff; color: var(--secondary); border-color: #fff; }
+
+        /* ================== NAVBAR (Glassmorphism & Auto Resize) ================== */
+        .header { position: fixed; width: 100%; top: 0; z-index: 1000; height: var(--nav-height-top); transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); background: transparent; display: flex; align-items: center; }
+        .header.scrolled { height: var(--nav-height-scrolled); background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); box-shadow: 0 4px 30px rgba(44,30,22,0.1); border-bottom: 1px solid rgba(160,94,68,0.1); }
+        .header.scrolled .nav-link, .header.scrolled .nav-icon-btn { color: var(--secondary); }
+        .header.scrolled .bar { background-color: var(--secondary); }
+        
+        .navbar { display: flex; justify-content: space-between; align-items: center; height: 100%; width: 100%; }
+        
+        /* BIG Auto Sizing Logo */
+        .nav-logo { display: flex; align-items: center; }
+        .nav-logo img { height: 130px; object-fit: contain; filter: drop-shadow(0px 6px 12px rgba(0,0,0,0.5)); transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); transform-origin: left center; }
+        .header.scrolled .nav-logo img { height: 60px; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.1)); }
+        .nav-logo:hover img { transform: scale(1.05) rotate(-2deg); }
+        
+        .nav-menu { display: flex; gap: 3rem; }
+        .nav-link { font-size: 15px; font-weight: 500; color: #fff; position: relative; letter-spacing: 0.5px; transition: color 0.3s; text-transform: uppercase; }
+        .nav-link::after { content: ''; position: absolute; width: 6px; height: 6px; bottom: -10px; left: 50%; transform: translateX(-50%) scale(0); background-color: var(--primary); border-radius: 50%; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .nav-link:hover::after, .nav-link.active::after { transform: translateX(-50%) scale(1); }
+        .nav-link:hover, .nav-link.active { color: var(--primary) !important; }
+
+        .nav-right-cluster { display: flex; align-items: center; gap: 1.2rem; }
+        .nav-icon-btn { width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.1rem; transition: all 0.3s ease; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(5px); }
+        .header.scrolled .nav-icon-btn { background: var(--bg-main); border-color: #E6DCD3; }
+        .nav-icon-btn:hover { background: var(--primary); color: #fff !important; transform: translateY(-3px); box-shadow: 0 5px 15px var(--primary-glow); }
+        
+        .user-avatar { width: 45px; height: 45px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary); transition: transform 0.3s; background: #fff; cursor: pointer; }
+        .profile-dropdown { position: relative; display: flex; align-items: center;}
+        .profile-dropdown::after { content: ''; position: absolute; top: 100%; left: 0; width: 100%; height: 30px; }
+        .profile-menu { opacity: 0; visibility: hidden; transform: translateY(15px); position: absolute; right: 0; top: 130%; background: rgba(255,255,255,0.98); backdrop-filter: blur(10px); min-width: 220px; border-radius: var(--radius-md); box-shadow: 0 15px 35px rgba(0,0,0,0.15); overflow: hidden; z-index: 1001; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid var(--accent); }
+        .profile-dropdown:hover .profile-menu { opacity: 1; visibility: visible; transform: translateY(0); }
+        .profile-menu a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: var(--text-dark); font-size: 0.95rem; border-bottom: 1px solid var(--bg-main); transition: 0.3s; }
+        .profile-menu a:hover { background: var(--primary); color: #fff; padding-left: 25px; }
+
+        .hamburger { display: none; cursor: pointer; z-index: 1002; }
+        .bar { display: block; width: 28px; height: 3px; margin: 6px auto; background-color: #fff; transition: 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55); border-radius: 3px; }
+
+        /* ================== HERO SECTION ================== */
+        .hero-section { position: relative; height: 100vh; width: 100%; overflow: hidden; display: flex; align-items: center; background: var(--secondary); }
+        .hero-bg-layer { position: absolute; top: 0; left: 0; width: 100%; height: 120%; z-index: 0; }
+        
+        /* Slides */
+        .hero-slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-size: cover; background-position: center; opacity: 0; transition: opacity 1.5s ease-in-out; }
         .hero-slide.active { opacity: 1; z-index: 1; }
         video.hero-slide { object-fit: cover; }
-        .hero-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to right, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0) 100%); z-index: 2; pointer-events: none; }
-        .hero-content-wrapper { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; display: flex; align-items: center; pointer-events: none; }
-        .hero-text-item { display: none; max-width: 700px; padding-left: 5%; padding-right: 20px; text-align: left; pointer-events: auto; }
-        .hero-text-item.active { display: block; animation: fadeInUp 1s ease-out forwards; }
-        .hero-text-item h1 { font-family: var(--font-hero); font-size: 5rem; line-height: 1.1; margin-bottom: 1.5rem; color: #fff; text-shadow: 2px 2px 20px rgba(0,0,0,0.9); }
-        .hero-text-item h1 span { color: var(--primary-color); }
-        .hero-text-item p { font-size: 1.3rem; font-weight: 400; margin-bottom: 2.5rem; color: #eee; text-shadow: 1px 1px 10px rgba(0,0,0,0.9); max-width: 600px; }
+        
+        .hero-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(90deg, rgba(44,30,22,0.95) 0%, rgba(44,30,22,0.5) 50%, rgba(44,30,22,0.1) 100%); z-index: 2; }
+        
+        .hero-content-wrapper { position: relative; z-index: 4; display: flex; align-items: center; width: 100%; height: 100%; }
+        .hero-text-item { display: none; max-width: 750px; text-align: left; }
+        .hero-text-item.active { display: block; }
+        .hero-badge { display: inline-block; padding: 6px 16px; background: rgba(212, 163, 115, 0.15); border: 1px solid var(--accent); color: var(--accent); border-radius: 30px; font-size: 0.85rem; font-weight: 600; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .typing-container h1 { font-family: var(--font-heading); font-size: 5.5rem; line-height: 1.1; margin-bottom: 1.5rem; color: #fff; }
+        .typing-container h1 span.highlight { color: var(--accent); position: relative; }
+        
+        .hero-text-item p { font-size: 1.25rem; margin-bottom: 2.5rem; color: #EAE0D5; font-weight: 300; line-height: 1.8; max-width: 600px; }
         .hero-actions { display: flex; gap: 1rem; }
-        .section-padding { padding: 6rem 0; }
-        .section-title { font-family: var(--font-heading); font-size: 3rem; text-align: center; margin-bottom: 1rem; color: var(--heading-color); }
-        .section-subtitle { text-align: center; color: #666; max-width: 600px; margin: 0 auto 3.5rem; font-size: 1.1rem; }
-        .menu-tabs { display: flex; justify-content: center; gap: 1rem; margin-bottom: 3rem; }
-        .tab-btn { background: transparent; border: 2px solid var(--border-color); padding: 10px 25px; border-radius: 30px; font-family: var(--font-body); font-weight: 600; color: #666; cursor: pointer; transition: all 0.3s; }
-        .tab-btn:hover, .tab-btn.active { background: var(--primary-color); border-color: var(--primary-color); color: var(--white); }
-        .menu-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2rem; animation: fadeIn 0.5s ease; }
-        .menu-grid.active { display: grid; }
-        .menu-item-card { background: var(--white); border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.05); transition: transform 0.3s ease; border: 1px solid var(--border-color); display: flex; flex-direction: column; cursor: pointer; }
-        .menu-item-card:hover { transform: translateY(-8px); box-shadow: 0 15px 40px rgba(0,0,0,0.1); }
-        .card-img { height: 220px; overflow: hidden; background: #f4f4f4; }
-        .card-img img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
-        .menu-item-card:hover .card-img img { transform: scale(1.1); }
-        .card-body { padding: 1.5rem; flex-grow: 1; display: flex; flex-direction: column; }
-        .card-title { font-family: var(--font-heading); font-size: 1.3rem; font-weight: 700; margin-bottom: 0.5rem; }
-        .card-desc { font-size: 0.9rem; color: #777; margin-bottom: 1rem; }
-        .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
-        .card-price { font-weight: 700; color: var(--primary-color); font-size: 1.2rem; }
-        .about-section { background-color: var(--white); }
-        .features-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; margin-bottom: 4rem; }
-        .feature-box { background: var(--bg-light); padding: 2.5rem; border-radius: 12px; text-align: center; border: 1px solid var(--border-color); }
-        .feature-box i { font-size: 2.5rem; color: var(--primary-color); margin-bottom: 1.5rem; }
-        .feature-box h4 { font-family: var(--font-heading); font-size: 1.25rem; margin-bottom: 10px; }
-        .about-content { display: grid; grid-template-columns: 1.2fr 1fr; gap: 4rem; align-items: center; }
-        .about-text h3 { font-family: var(--font-heading); font-size: 2.2rem; margin-bottom: 1.5rem; }
-        .stats-row { display: flex; gap: 2rem; margin-top: 2rem; }
-        .stat-item { text-align: center; flex: 1; background: rgba(185, 90, 75, 0.05); padding: 1rem; border-radius: 10px; }
-        .stat-num { font-size: 2rem; font-weight: 700; color: var(--primary-color); display: block; }
-        .stat-label { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: #777; }
-        .contact-section { background-color: var(--bg-light); }
-        .contact-wrapper { display: grid; grid-template-columns: 1fr 1.5fr; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.08); margin-bottom: 3rem; }
-        .contact-details { background: var(--secondary-color); color: var(--white); padding: 3rem; display: flex; flex-direction: column; justify-content: center; }
-        .contact-details h3 { color: var(--white); font-family: var(--font-heading); font-size: 2rem; margin-bottom: 2rem; }
-        .contact-item { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
-        .contact-item i { color: var(--footer-link-hover); font-size: 1.2rem; margin-top: 5px; }
-        .contact-item strong { display: block; font-size: 0.9rem; opacity: 0.7; margin-bottom: 3px; }
-        .hours-box { background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 10px; margin-top: 1rem; }
-        .hours-row { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; }
-        .map-container { min-height: 400px; }
-        .map-container iframe { width: 100%; height: 100%; border: 0; }
-        .footer { background-color: var(--footer-bg-color); color: var(--footer-text-color); padding-top: 4rem; font-size: 0.95rem; }
-        .footer-content { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 3rem; padding-bottom: 3rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .footer-brand h3 { color: var(--white); font-family: var(--font-logo-cafe); font-size: 1.8rem; margin-bottom: 1rem; }
-        .footer-brand p { opacity: 0.7; margin-bottom: 1.5rem; line-height: 1.7; }
-        .socials { display: flex; gap: 15px; }
-        .social-link { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; transition: 0.3s; color: var(--white); }
-        .social-link:hover { background: var(--footer-link-hover); color: var(--secondary-color); }
-        .footer-col h4 { color: var(--white); font-size: 1.1rem; margin-bottom: 1.5rem; font-family: var(--font-body); font-weight: bold; }
-        .footer-links li { margin-bottom: 0.8rem; }
-        .footer-links a { color: rgba(255,255,255,0.6); transition: 0.3s; }
-        .footer-links a:hover { color: var(--footer-link-hover); padding-left: 5px; }
-        .copyright { text-align: center; padding: 1.5rem 0; opacity: 0.5; font-size: 0.85rem; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; align-items: center; justify-content: center; backdrop-filter: blur(5px); animation: fadeIn 0.3s; }
-        .modal-box { background: #ffffff; padding: 40px; border-radius: 24px; width: 90%; max-width: 450px; position: relative; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        .modal-close { position: absolute; top: 20px; right: 25px; font-size: 1.5rem; color: #ccc; cursor: pointer; transition: 0.2s; }
-        .modal-close:hover { color: var(--primary-color); }
-        .modal-title { text-align: center; font-family: var(--font-heading); font-size: 2rem; margin-bottom: 2rem; color: var(--heading-color); }
+
+        /* ================== FLOATING CUPS ANIMATIONS ================== */
+        @keyframes floatCup { 
+            0% { transform: translateY(0) rotate(0deg) scale(1); } 
+            50% { transform: translateY(-50px) rotate(15deg) scale(1.1); } 
+            100% { transform: translateY(0) rotate(0deg) scale(1); } 
+        }
+
+        .anim-cup { position: absolute; opacity: 0.08; z-index: 1; pointer-events: none; animation: floatCup 15s infinite ease-in-out; filter: blur(2px); color: var(--primary); }
+
+        /* Other Section Cups */
+        .anim-cup.c1 { top: 10%; left: -2%; font-size: 200px; animation-duration: 20s; }
+        .anim-cup.c2 { bottom: 20%; right: -3%; font-size: 250px; animation-delay: -5s; animation-direction: reverse; color: var(--accent); }
+        .anim-cup.c3 { top: 40%; left: 85%; font-size: 150px; animation-duration: 18s; animation-delay: -2s; }
+        .anim-cup.c4 { bottom: 5%; left: 5%; font-size: 220px; animation-duration: 25s; }
+        .anim-cup.c5 { top: 50%; right: 40%; font-size: 140px; animation-duration: 28s; animation-delay: -8s; color: var(--secondary); opacity: 0.05; }
+        .anim-cup.c6 { top: 5%; right: 15%; font-size: 100px; animation-duration: 16s; }
+
+        /* ================== SECTION GLOBALS ================== */
+        .section-padding { padding: 8rem 0; position: relative; overflow: hidden; }
+        .section-header { text-align: center; margin-bottom: 4rem; position: relative; z-index: 2; }
+        .section-tag { display: inline-block; color: var(--primary); font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px; }
+        .section-title { font-family: var(--font-heading); font-size: 3.2rem; color: var(--secondary); margin-bottom: 1rem; }
+        .section-subtitle { color: var(--text-muted); max-width: 600px; margin: 0 auto; font-size: 1.1rem; }
+
+        /* ================== MENU SECTION ================== */
+        .menu-section { 
+            background-image: linear-gradient(rgba(248, 244, 238, 0.96), rgba(248, 244, 238, 0.96)), url('Cover-Photo.jpg');
+            background-attachment: fixed;
+            background-size: cover;
+            background-position: center;
+        }
+        .menu-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; margin-bottom: 4rem; position: relative; z-index: 2;}
+        .filter-btn { background: var(--bg-card); border: 1px solid #E6DCD3; padding: 10px 24px; border-radius: 50px; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: all 0.3s; box-shadow: var(--shadow-soft); font-size: 0.95rem; }
+        .filter-btn:hover { color: var(--primary); border-color: var(--primary); transform: translateY(-2px); }
+        .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: 0 8px 20px var(--primary-glow); }
+        
+        .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 2.5rem; position: relative; min-height: 400px; z-index: 2;}
+        
+        .menu-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: 1rem; box-shadow: var(--shadow-soft); transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); display: flex; flex-direction: column; cursor: pointer; border: 1px solid rgba(160, 94, 68, 0.05); }
+        
+        .menu-card.hide { opacity: 0; transform: scale(0.8); pointer-events: none; position: absolute; }
+        .menu-card.show { opacity: 1; transform: scale(1); position: relative; }
+        
+        .menu-card:hover { transform: translateY(-12px); box-shadow: var(--shadow-hover); border-color: rgba(160, 94, 68, 0.3); }
+        .card-img-wrapper { height: 220px; border-radius: var(--radius-md); overflow: hidden; position: relative; margin-bottom: 1.5rem; }
+        .card-img-wrapper img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+        .menu-card:hover .card-img-wrapper img { transform: scale(1.1) rotate(2deg); }
+        
+        .card-cat-badge { position: absolute; top: 12px; left: 12px; background: rgba(255,255,255,0.95); backdrop-filter: blur(5px); color: var(--primary); padding: 5px 14px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; z-index: 2; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(160,94,68,0.2); }
+        
+        .card-content { flex-grow: 1; display: flex; flex-direction: column; padding: 0 0.5rem; }
+        .card-title { font-family: var(--font-heading); font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 1rem; line-height: 1.3; }
+        
+        .size-selector { width: 100%; padding: 12px 16px; margin-bottom: 15px; border: 1px solid #E6DCD3; border-radius: var(--radius-sm); font-size: 0.9rem; background: var(--bg-main); color: var(--text-dark); cursor: pointer; transition: 0.3s; appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A05E44%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 1rem top 50%; background-size: 0.65rem auto; }
+        .size-selector:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 4px var(--primary-glow); background-color: #fff; }
+        
+        .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 1rem; border-top: 1px dashed #E6DCD3; }
+        .card-price { font-size: 1.4rem; font-weight: 700; color: var(--primary); font-family: var(--font-heading); }
+        .add-cart-btn { background: var(--primary); color: #fff; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.3s; border: none; font-size: 1.1rem; cursor: pointer; box-shadow: 0 4px 10px var(--primary-glow); }
+        .menu-card:hover .add-cart-btn { transform: scale(1.1) rotate(90deg); background: var(--secondary); }
+
+        @keyframes pulseBtn { 0% { box-shadow: 0 0 0 0 rgba(160, 94, 68, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(160, 94, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(160, 94, 68, 0); } }
+        #showMoreBtn { animation: pulseBtn 2s infinite; }
+
+        /* ================== ABOUT SECTION ================== */
+        .about-section { 
+            background-image: linear-gradient(135deg, rgba(248, 244, 238, 0.94) 0%, rgba(239, 229, 217, 0.94) 100%), url('Cover-Photo.jpg');
+            background-attachment: fixed;
+            background-size: cover;
+            background-position: center;
+        }
+        .shape { position: absolute; border-radius: 50%; filter: blur(60px); z-index: 0; animation: floatShape 15s infinite alternate; pointer-events: none; }
+        .shape-1 { width: 350px; height: 350px; background: rgba(160, 94, 68, 0.15); top: -50px; left: -100px; }
+        .shape-2 { width: 450px; height: 450px; background: rgba(212, 163, 115, 0.2); bottom: -100px; right: -100px; animation-delay: -5s; }
+        @keyframes floatShape { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(50px, 50px) scale(1.1); } }
+        
+        .about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; position: relative; z-index: 1; }
+        .about-img-group { position: relative; }
+        .about-img-main { width: 90%; border-radius: var(--radius-lg); box-shadow: 0 20px 50px rgba(44,30,22,0.15); border: 4px solid #fff; }
+        .about-experience-badge { position: absolute; bottom: 10%; right: 0; background: var(--bg-card); padding: 1.5rem; border-radius: var(--radius-md); box-shadow: 0 15px 35px rgba(44,30,22,0.15); display: flex; align-items: center; gap: 15px; animation: float 6s infinite ease-in-out; border: 1px solid rgba(160,94,68,0.2); }
+        .exp-num { font-family: var(--font-heading); font-size: 3rem; color: var(--primary); font-weight: 700; line-height: 1; }
+        .exp-text { font-size: 0.9rem; color: var(--text-muted); font-weight: 500; line-height: 1.2; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .about-text h2 { font-family: var(--font-heading); font-size: 3rem; color: var(--secondary); margin-bottom: 1.5rem; line-height: 1.2; }
+        .about-text p { color: var(--text-muted); font-size: 1.05rem; margin-bottom: 1.5rem; }
+        
+        .stats-row { display: flex; gap: 3rem; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid rgba(160, 94, 68, 0.2); }
+        .stat-item h3 { font-family: var(--font-heading); font-size: 2.5rem; color: var(--secondary); margin-bottom: 5px; }
+        .stat-item p { color: var(--primary); font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+
+        /* ================== CONTACT SECTION ================== */
+        .contact-section { 
+            background-image: linear-gradient(135deg, rgba(239, 229, 217, 0.94) 0%, rgba(230, 220, 211, 0.94) 100%), url('Cover-Photo.jpg');
+            background-attachment: fixed;
+            background-size: cover;
+            background-position: center;
+        }
+        .shape-3 { width: 300px; height: 300px; background: rgba(44, 30, 22, 0.08); top: 20%; right: 5%; animation-delay: -2s; }
+        .shape-4 { width: 400px; height: 400px; background: rgba(160, 94, 68, 0.1); bottom: 10%; left: -5%; animation-delay: -7s; }
+
+        .contact-wrapper { display: grid; grid-template-columns: 1fr 1.5fr; background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-soft); overflow: hidden; margin-bottom: 4rem; position: relative; z-index: 2; border: 1px solid rgba(255,255,255,0.5); }
+        
+        /* 3D Tilt Card Panel */
+        .contact-info-panel { background: linear-gradient(135deg, var(--secondary), #1A120D); color: #fff; padding: 4rem 3rem; position: relative; overflow: hidden; transform-style: preserve-3d; perspective: 1000px; }
+        .contact-info-panel::after { content: ''; position: absolute; width: 300px; height: 300px; background: rgba(160, 94, 68, 0.3); filter: blur(60px); top: -50px; right: -50px; border-radius: 50%; pointer-events: none;}
+        
+        .info-content { transform: translateZ(30px); position: relative; z-index: 1; }
+        .info-content h3 { font-family: var(--font-heading); font-size: 2.2rem; margin-bottom: 2.5rem; color: var(--accent); }
+        
+        .info-item { display: flex; gap: 1.5rem; margin-bottom: 2rem; align-items: center; }
+        .info-icon { width: 50px; height: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 1.2rem; transition: 0.4s; backdrop-filter: blur(4px); }
+        .info-item:hover .info-icon { background: var(--primary); color: #fff; transform: scale(1.1) rotate(10deg); box-shadow: 0 0 20px var(--primary-glow); border-color:var(--primary); }
+        .info-text h4 { font-size: 1.1rem; margin-bottom: 0.2rem; font-weight: 500; }
+        .info-text p { color: rgba(255,255,255,0.7); font-size: 0.95rem; margin: 0; }
+
+        /* Dynamic Form */
+        .contact-form-panel { padding: 4rem 3rem; background: var(--bg-card); }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem 1.5rem; margin-top: 1rem; }
+        .form-group { position: relative; }
+        .form-group.full { grid-column: 1 / -1; }
+        
+        .form-control { width: 100%; padding: 16px 20px; border: 2px solid #E6DCD3; border-radius: var(--radius-sm); font-family: var(--font-body); font-size: 1rem; background: transparent; transition: all 0.3s; color: var(--text-dark); }
+        .form-label { position: absolute; left: 20px; top: 18px; color: var(--text-muted); transition: all 0.3s ease; pointer-events: none; background: var(--bg-card); padding: 0 5px; }
+        .form-control:focus, .form-control:not(:placeholder-shown) { border-color: var(--primary); outline: none; }
+        .form-control:focus ~ .form-label, .form-control:not(:placeholder-shown) ~ .form-label { top: -10px; left: 15px; font-size: 0.85rem; color: var(--primary); font-weight: 500; }
+        textarea.form-control { min-height: 150px; resize: vertical; }
+
+        /* ================== FOOTER ================== */
+        .footer { background-color: #1A120D; color: rgba(255,255,255,0.7); padding-top: 5rem; position: relative; overflow: hidden; }
+        .footer::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 5px; background: linear-gradient(90deg, var(--primary), var(--accent)); }
+        .footer-content { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 4rem; padding-bottom: 3rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .footer-brand img { height: 100px; margin-bottom: 1.5rem; filter: brightness(0) invert(1) opacity(0.8); }
+        .socials { display: flex; gap: 15px; margin-top: 2rem; }
+        .social-link { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: #fff; transition: 0.3s; }
+        .social-link:hover { background: var(--primary); transform: translateY(-3px); }
+        .footer-col h4 { color: #fff; font-size: 1.2rem; margin-bottom: 1.5rem; font-family: var(--font-heading); letter-spacing: 0.5px; }
+        .footer-links li { margin-bottom: 1rem; }
+        .footer-links a:hover { color: var(--accent); padding-left: 5px; }
+
+        /* ================== MODALS ================== */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; align-items: center; justify-content: center; backdrop-filter: blur(10px); opacity: 0; transition: opacity 0.3s ease; }
+        .modal-overlay.show { opacity: 1; }
+        .modal-box { background: rgba(255, 255, 255, 0.98); padding: 40px; border-radius: var(--radius-lg); width: 90%; max-width: 450px; position: relative; box-shadow: 0 30px 60px rgba(0,0,0,0.3); transform: translateY(30px) scale(0.95); transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--accent); }
+        .modal-overlay.show .modal-box { transform: translateY(0) scale(1); }
+        .modal-close { position: absolute; top: 20px; right: 25px; font-size: 1.8rem; color: var(--text-muted); cursor: pointer; transition: 0.2s; line-height: 1; }
+        .modal-close:hover { color: var(--primary); transform: rotate(90deg); }
+        .modal-title { text-align: center; font-family: var(--font-heading); font-size: 2.2rem; margin-bottom: 2rem; color: var(--secondary); }
+        
         .input-group { position: relative; margin-bottom: 20px; }
-        .input-icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: #aaa; font-size: 1rem; z-index: 2; }
-        .input-field { width: 100%; padding: 14px 15px 14px 48px; border: 1px solid #e2e8f0; border-radius: 12px; font-family: var(--font-body); font-size: 1rem; background: #f8f9fa; transition: 0.3s; color: var(--text-color); }
-        .input-field:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 4px rgba(185, 90, 75, 0.1); outline: none; }
-        .modal-btn { width: 100%; padding: 14px; border-radius: 12px; font-size: 1rem; margin-top: 10px; border: none; cursor: pointer; background: var(--primary-color); color: white; font-weight: bold; }
-        .modal-btn:hover { background: var(--primary-dark); }
-        .modal-footer { text-align: center; margin-top: 25px; font-size: 0.95rem; color: #666; }
-        .link-highlight { color: var(--primary-color); font-weight: 700; cursor: pointer; }
-        .link-highlight:hover { text-decoration: underline; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); scale: 0.95; } to { opacity: 1; transform: translateY(0); scale: 1; } }
-        @media (max-width: 992px) { .features-row { grid-template-columns: 1fr; } .about-content { grid-template-columns: 1fr; text-align: center; } .contact-wrapper { grid-template-columns: 1fr; } .hero-text-item h1 { font-size: 3.5rem; } .footer-content { grid-template-columns: 1fr; } }
-        @media (max-width: 768px) { .nav-menu, .nav-right-cluster { display: none; } .hamburger { display: block; } .nav-menu.active { display: flex; flex-direction: column; position: absolute; top: var(--nav-height); left: 0; width: 100%; background: var(--secondary-color); padding: 2rem; text-align: center; } .mobile-link { display: block; margin-bottom: 1rem; } }
+        .input-icon { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); color: #aaa; font-size: 1.1rem; z-index: 2; transition: 0.3s; }
+        .input-field { width: 100%; padding: 16px 20px 16px 50px; border: 2px solid #E6DCD3; border-radius: var(--radius-sm); font-family: var(--font-body); font-size: 1rem; background: #fff; transition: 0.3s; }
+        .input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-glow); outline: none; }
+        .input-field:focus + .input-icon { color: var(--primary); }
+
+        /* Responsive */
+        @media (max-width: 992px) { 
+            .about-grid, .contact-wrapper, .footer-content { grid-template-columns: 1fr; } 
+            .about-img-group { order: -1; margin-bottom: 2rem; }
+            .typing-container h1 { font-size: 4rem; } 
+            .nav-logo img { height: 90px; }
+            .header { --nav-height-top: 110px; }
+        }
+        @media (max-width: 768px) { 
+            .nav-menu, .nav-right-cluster { display: none; } 
+            .hamburger { display: block; } 
+            .nav-menu.active { display: flex; flex-direction: column; position: absolute; top: var(--nav-height-scrolled); left: 0; width: 100%; background: var(--bg-card); padding: 2rem; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); } 
+            .nav-menu.active .nav-link { color: var(--secondary) !important; font-size: 1.2rem; }
+            .mobile-link { display: block; margin-bottom: 1rem; } 
+            .form-grid { grid-template-columns: 1fr; }
+            .stats-row { flex-direction: column; gap: 1.5rem; text-align: center; }
+            .about-experience-badge { position: relative; width: max-content; margin: -30px auto 0; }
+            .anim-cup { display: none; } 
+        }
     </style>
 </head>
 <body>
-    <header class="header">
+
+    <header class="header" id="navbar">
         <nav class="navbar container">
             <a href="#home" class="nav-logo">
-                <span class="logo-cafe"><span class="first-letter">C</span>afe</span>
-                <span class="logo-emmanuel"><span class="first-letter">E</span>mmanuel</span>
+                <img src="Logo_Brand.png" alt="Cafe Emmanuel Logo">
             </a>
             <ul class="nav-menu">
                 <li><a href="#home" class="nav-link active">Home</a></li>
-                <li><a href="product.php" class="nav-link">Menu</a></li>
+                <li><a href="#menu" class="nav-link">Menu</a></li>
                 <li><a href="#about" class="nav-link">About</a></li>
-                <li><a href="contact.php" class="nav-link">Contact</a></li>
+                <li><a href="#contact" class="nav-link">Contact</a></li>
                 <?php if (isset($_SESSION['user_id'])): ?>
                     <li><a href="my_orders.php" class="nav-link">My Orders</a></li>
-                <?php endif; ?>
-                <?php if (isset($_SESSION['user_id'])): ?>
-                    <li class="mobile-link" style="display:none;"><a href="logout.php" class="nav-link">Logout</a></li>
+                    <li class="mobile-link" style="display:none;"><a href="logout.php" class="nav-link" style="color:var(--primary)!important;">Logout</a></li>
                 <?php else: ?>
-                    <li class="mobile-link" style="display:none;"><a href="#" onclick="openModal('loginModal')" class="nav-link">Login</a></li>
+                    <li class="mobile-link" style="display:none;"><a href="#" onclick="openModal('loginModal')" class="nav-link" style="color:var(--primary)!important;">Login</a></li>
                 <?php endif; ?>
             </ul>
             <div class="nav-right-cluster">
-                <a href="cart.php" class="nav-icon-btn" title="View Cart">
-                    <i class="fas fa-shopping-cart"></i>
-                </a>
+                <a href="cart.php" class="nav-icon-btn" title="View Cart"><i class="fas fa-shopping-cart"></i></a>
                 <?php if (isset($_SESSION['user_id'])): ?>
                     <div class="nav-icon-btn" title="Notifications">
                         <?php include 'notification_bell.php'; ?>
                     </div>
-                <?php endif; ?>
-                <?php if (isset($_SESSION['user_id']) && isset($_SESSION['fullname'])): ?>
                     <div class="profile-dropdown">
-                        <?php 
-                            $profilePic = !empty($_SESSION['profile_pic']) ? $_SESSION['profile_pic'] : 'https://ui-avatars.com/api/?name='.urlencode($_SESSION['fullname']).'&background=B95A4B&color=fff';
-                        ?>
+                        <?php $profilePic = !empty($_SESSION['profile_pic']) ? $_SESSION['profile_pic'] : 'https://ui-avatars.com/api/?name='.urlencode($_SESSION['fullname']).'&background=A05E44&color=fff'; ?>
                         <img src="<?php echo htmlspecialchars($profilePic); ?>" alt="Profile" class="user-avatar">
                         <div class="profile-menu">
-                            <a href="profile.php"><i class="fas fa-user"></i> My Profile</a>
+                            <a href="profile.php"><i class="fas fa-user-circle"></i> My Profile</a>
                             <?php if (in_array($_SESSION['role'], ['admin', 'super_admin'])): ?>
-                                <a href="Dashboard.php"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+                                <a href="Dashboard.php"><i class="fas fa-chart-line"></i> Dashboard</a>
                             <?php endif; ?>
                             <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Log Out</a>
                         </div>
                     </div>
                 <?php else: ?>
-                    <button class="login-trigger" onclick="openModal('loginModal')">Login</button>
+                    <button class="btn btn-primary" style="padding: 10px 24px; font-size: 0.95rem; box-shadow: none;" onclick="openModal('loginModal')">Sign In</button>
                 <?php endif; ?>
             </div>
-            <div class="hamburger">
+            <div class="hamburger" id="hamburger">
                 <span class="bar"></span>
                 <span class="bar"></span>
                 <span class="bar"></span>
@@ -476,194 +590,238 @@ if (empty($hero_slides)) {
         </nav>
     </header>
 
-    <section id="home" class="hero-section" id="heroSlider">
-        <?php foreach ($hero_slides as $index => $slide): ?>
-            <?php 
+    <section id="home" class="hero-section">
+        <div class="hero-bg-layer" id="heroBgLayer">
+            <?php foreach ($hero_slides as $index => $slide): 
                 $isActive = ($index === 0) ? 'active' : ''; 
                 $isVideo = ($slide['type'] === 'video');
             ?>
-            
-            <?php if ($isVideo): ?>
-                <video class="hero-slide <?php echo $isActive; ?> video-slide" 
-                       data-type="video" 
-                       muted playsinline>
-                    <source src="<?php echo htmlspecialchars($slide['file_path']); ?>" type="video/mp4">
-                    Your browser does not support HTML5 video.
-                </video>
-            <?php else: ?>
-                <div class="hero-slide <?php echo $isActive; ?> image-slide" 
-                     data-type="image"
-                     style="background-image: url('<?php echo htmlspecialchars($slide['file_path']); ?>');">
-                </div>
-            <?php endif; ?>
-        <?php endforeach; ?>
+                <?php if ($isVideo): ?>
+                    <video class="hero-slide <?php echo $isActive; ?> video-slide" muted playsinline>
+                        <source src="<?php echo htmlspecialchars($slide['file_path']); ?>" type="video/mp4">
+                    </video>
+                <?php else: ?>
+                    <div class="hero-slide <?php echo $isActive; ?> image-slide" style="background-image: url('<?php echo htmlspecialchars($slide['file_path']); ?>');"></div>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        </div>
 
         <div class="hero-overlay"></div>
+        
         <div class="hero-content-wrapper container">
             <?php foreach ($hero_slides as $index => $slide): ?>
                 <div class="hero-text-item <?php echo $index === 0 ? 'active' : ''; ?>">
-                    <h1><?php echo $slide['heading']; ?></h1>
-                    <p><?php echo nl2br(htmlspecialchars($slide['subtext'])); ?></p>
-                    <div class="hero-actions">
+                    <span class="hero-badge reveal">Artisanal Coffee & Dining</span>
+                    <div class="typing-container reveal" style="transition-delay: 0.1s;">
+                        <h1 class="typewriter-text-target">
+                            Welcome to <span class="highlight">Cafe Emmanuel</span>
+                        </h1>
+                    </div>
+                    <p class="reveal" style="transition-delay: 0.2s;"><?php echo nl2br(htmlspecialchars($slide['subtext'])); ?></p>
+                    <div class="hero-actions reveal" style="transition-delay: 0.3s;">
                         <?php if (!empty($slide['button_text'])): ?>
-                            <a href="<?php echo htmlspecialchars($slide['button_link']); ?>" class="btn btn-primary"><?php echo htmlspecialchars($slide['button_text']); ?></a>
+                            <a href="<?php echo htmlspecialchars($slide['button_link']); ?>" class="btn btn-primary"><?php echo htmlspecialchars($slide['button_text']); ?> <i class="fas fa-arrow-right"></i></a>
                         <?php endif; ?>
-                        <a href="https://mancavegallery.com/" class="btn btn-outline">View Our Gallery</a>
+                        <a href="https://mancavegallery.com/" class="btn btn-outline" target="_blank">View Gallery</a>
                     </div>
                 </div>
             <?php endforeach; ?>
         </div>
     </section>
 
-    <section id="menu" class="section-padding">
+    <section id="menu" class="section-padding menu-section">
+        <i class="fas fa-coffee anim-cup c1"></i>
+        <i class="fas fa-mug-hot anim-cup c2"></i>
+        
         <div class="container">
-            <h2 class="section-title">Our Specialties</h2>
-            <p class="section-subtitle">Handpicked favorites from our kitchen to your table.</p>
-            <div class="menu-tabs">
-                <button class="tab-btn active" onclick="switchTab('coffee', this)">Coffee</button>
-                <button class="tab-btn" onclick="switchTab('food', this)">All Day Breakfast</button>
-                <button class="tab-btn" onclick="switchTab('pizza', this)">Pizza</button>
-            </div>
-
-            <div id="coffee" class="menu-grid active">
-                <?php if (!empty($coffee_items)): ?>
-                    <?php foreach ($coffee_items as $item): ?>
-                        <a href="product.php" class="menu-item-card">
-                            <div class="card-img">
-                                <img src="<?php echo htmlspecialchars($item['image']); ?>" alt="<?php echo htmlspecialchars($item['name']); ?>">
-                            </div>
-                            <div class="card-body">
-                                <h3 class="card-title"><?php echo htmlspecialchars($item['name']); ?></h3>
-                                <p class="card-desc">A rich and aromatic blend brewed to perfection.</p>
-                                <div class="card-footer">
-                                    <span class="card-price">₱<?php echo number_format($item['price'], 2); ?></span>
-                                    <span class="btn-primary" style="padding: 5px 12px; border-radius: 50%; font-size: 0.8rem;"><i class="fas fa-plus"></i></span>
-                                </div>
-                            </div>
-                        </a>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <p style="text-align: center; grid-column: 1/-1;">No items found.</p>
-                <?php endif; ?>
-            </div>
-
-            <div id="food" class="menu-grid">
-                <?php if (!empty($food_items)): ?>
-                    <?php foreach ($food_items as $item): ?>
-                        <a href="product.php" class="menu-item-card">
-                            <div class="card-img">
-                                <img src="<?php echo htmlspecialchars($item['image']); ?>" alt="<?php echo htmlspecialchars($item['name']); ?>">
-                            </div>
-                            <div class="card-body">
-                                <h3 class="card-title"><?php echo htmlspecialchars($item['name']); ?></h3>
-                                <p class="card-desc">Freshly prepared <?php echo htmlspecialchars($item['category']); ?>.</p>
-                                <div class="card-footer">
-                                    <span class="card-price">₱<?php echo number_format($item['price'], 2); ?></span>
-                                    <span class="btn-primary" style="padding: 5px 12px; border-radius: 50%; font-size: 0.8rem;"><i class="fas fa-plus"></i></span>
-                                </div>
-                            </div>
-                        </a>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
-
-            <div id="pizza" class="menu-grid">
-                <?php if (!empty($sandwich_items)): ?>
-                    <?php foreach ($sandwich_items as $item): ?>
-                        <a href="product.php" class="menu-item-card">
-                            <div class="card-img">
-                                <img src="<?php echo htmlspecialchars($item['image']); ?>" alt="<?php echo htmlspecialchars($item['name']); ?>">
-                            </div>
-                            <div class="card-body">
-                                <h3 class="card-title"><?php echo htmlspecialchars($item['name']); ?></h3>
-                                <p class="card-desc">Sweet treats to brighten your day.</p>
-                                <div class="card-footer">
-                                    <span class="card-price">₱<?php echo number_format($item['price'], 2); ?></span>
-                                    <span class="btn-primary" style="padding: 5px 12px; border-radius: 50%; font-size: 0.8rem;"><i class="fas fa-plus"></i></span>
-                                </div>
-                            </div>
-                        </a>
-                    <?php endforeach; ?>
-                <?php endif; ?>
+            <div class="section-header reveal">
+                <span class="section-tag">Our Menu</span>
+                <h2 class="section-title">A Symphony of Taste</h2>
+                <p class="section-subtitle">Handpicked favorites from our kitchen to your table, crafted with passion and precision using only the finest ingredients.</p>
             </div>
             
-            <div style="text-align: center; margin-top: 3rem;">
-                <a href="product.php" class="btn btn-outline" style="border-color: var(--primary-color); color: var(--primary-color);">Explore Full Menu</a>
+            <div class="menu-filters reveal">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="coffee">Coffee</button>
+                <button class="filter-btn" data-filter="non-coffee">Non-Coffee</button>
+                <button class="filter-btn" data-filter="food">Food</button>
+                <button class="filter-btn" data-filter="breakfast">Breakfast</button>
+                <button class="filter-btn" data-filter="pizza">Pizza</button>
+            </div>
+
+            <div class="menu-grid" id="menuGrid">
+                <?php 
+                foreach ($all_products as $product): 
+                    $cat = strtolower($product['category']);
+                    $filterClass = $cat;
+                    if(in_array($cat, ['pizza','katsu','ali di pollo','antipasto','mexican food','waffle','pasta','sandwich','all day breakfast'])) { $filterClass .= ' food'; }
+                    if(in_array($cat, ['all day breakfast'])) { $filterClass .= ' breakfast'; }
+                    if(in_array($cat, ['classico','over iced','cafe artistry','freddo'])) { $filterClass .= ' coffee'; }
+                    if(in_array($cat, ['hot tea','refresher','iced tea','hot choco','smoothies'])) { $filterClass .= ' non-coffee'; }
+
+                    $product_data = htmlspecialchars(json_encode($product), ENT_QUOTES, 'UTF-8');
+                    $onclick_action = isset($_SESSION['user_id']) ? "viewProduct(" . $product_data . ")" : "openModal('loginModal')";
+                ?>
+                <div class="menu-card reveal" data-category="<?php echo htmlspecialchars($filterClass); ?>" onclick="<?php echo $onclick_action; ?>">
+                    <div class="card-img-wrapper">
+                        <div class="card-cat-badge"><?php echo htmlspecialchars($product['category']); ?></div>
+                        <img src="<?php echo htmlspecialchars($product['image']); ?>" alt="<?php echo htmlspecialchars($product['name']); ?>" loading="lazy">
+                    </div>
+                    <div class="card-content">
+                        <h3 class="card-title"><?php echo htmlspecialchars($product['name']); ?></h3>
+                        
+                        <?php
+                            $pid = $product['id'];
+                            $size_sql = "SELECT * FROM product_sizes WHERE product_id = $pid ORDER BY price ASC";
+                            $size_result = $conn->query($size_sql);
+
+                            if ($size_result && $size_result->num_rows > 0) {
+                                echo '<select class="size-selector" onclick="event.stopPropagation();" onchange="updatePrice(this)">';
+                                $first = true; $default_price = 0;
+                                while($size = $size_result->fetch_assoc()) {
+                                    if($first) { $default_price = $size['price']; $first = false; }
+                                    echo '<option value="' . $size['size_name'] . '" data-price="' . $size['price'] . '">' . $size['size_name'] . '</option>';
+                                }
+                                echo '</select>';
+                                echo '<div class="card-footer">';
+                                echo '<span class="card-price price">₱' . number_format($default_price, 2) . '</span>';
+                                echo '<button class="add-cart-btn add-cart" data-price="'.$default_price.'" data-size="Regular"><i class="fas fa-plus"></i></button>';
+                                echo '</div>';
+                            } else {
+                                echo '<div style="flex-grow:1;"></div>'; 
+                                echo '<div class="card-footer">';
+                                echo '<span class="card-price price">₱' . number_format($product['price'], 2) . '</span>';
+                                echo '<button class="add-cart-btn add-cart" data-price="'.$product['price'].'" data-size="Standard"><i class="fas fa-plus"></i></button>';
+                                echo '</div>';
+                            }
+                        ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            
+            <div id="showMoreContainer" style="text-align: center; margin-top: 3rem; display: none;">
+                <button id="showMoreBtn" class="btn btn-outline" style="color:var(--primary); border-color:var(--primary); font-size: 1.1rem; padding: 12px 40px; background:var(--bg-card);">Show More Menu <i class="fas fa-chevron-down" style="margin-left: 5px;"></i></button>
             </div>
         </div>
     </section>
 
     <section id="about" class="section-padding about-section">
+        <div class="shape shape-1"></div>
+        <div class="shape shape-2"></div>
+        <i class="fas fa-glass-whiskey anim-cup c3"></i>
+        <i class="fas fa-coffee anim-cup c6"></i>
+        
         <div class="container">
-            <div class="features-row">
-                <div class="feature-box">
-                    <i class="fas fa-mug-hot"></i>
-                    <h4>Artisanal Coffee</h4>
-                    <p style="color: #666;">Sourced from the best farms and roasted in-house.</p>
-                </div>
-                <div class="feature-box">
-                    <i class="fas fa-heart"></i>
-                    <h4>Made with Love</h4>
-                    <p style="color: #666;">Prepared fresh daily using premium ingredients.</p>
-                </div>
-                <div class="feature-box">
-                    <i class="fas fa-users"></i>
-                    <h4>Community Hub</h4>
-                    <p style="color: #666;">A place where neighbors become family.</p>
-                </div>
-            </div>
-            <div class="about-content">
-                <div class="about-text">
-                    <h4 style="color:var(--primary-color); text-transform:uppercase; letter-spacing:1px; font-size:0.9rem;">Our Story</h4>
-                    <h3>A Tradition of Excellence</h3>
-                    <p style="color:#555; font-size:1.05rem;">What started as a simple dream to serve exceptional coffee has grown into a community cornerstone. We wanted to create a space that felt like an extension of your living room.</p>
-                    <div class="stats-row">
-                        <div class="stat-item"><span class="stat-num">500+</span><span class="stat-label">Daily Cups</span></div>
-                        <div class="stat-item"><span class="stat-num">6</span><span class="stat-label">Years</span></div>
-                        <div class="stat-item"><span class="stat-num">7</span><span class="stat-label">Days Open</span></div>
+            <div class="about-grid">
+                <div class="about-img-group reveal">
+                    <img src="Cover-Photo.jpg" alt="Cafe Barista" class="about-img-main">
+                    <div class="about-experience-badge" id="tiltCard">
+                        <div class="exp-num counter" data-target="2">0</div>
+                        <div class="exp-text">Years of<br>Excellence</div>
                     </div>
                 </div>
-                <div class="about-image">
-                    <img src="Cover-Photo.jpg" alt="Cafe Interior" style="width:100%; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
+                
+                <div class="about-text reveal">
+                    <span class="section-tag">Our Heritage</span>
+                    <h2>Brewing Magic Since 2024</h2>
+                    <p>Cafe Emmanuel started as a simple dream: to create a space where exceptional coffee meets genuine hospitality. Located in the heart of Pampanga, we wanted to build more than just a coffee shop—we wanted to build a community hub.</p>
+                    <p>We blend local artistry with contemporary design to create an atmosphere that feels both modern and timeless. We meticulously source our beans and craft our menu to ensure every visit is an experience worth remembering.</p>
+                    
+                    <div class="stats-row">
+                        <div class="stat-item">
+                            <h3 class="counter" data-target="500">0</h3>
+                            <p>Daily Cups</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3 class="counter" data-target="30">0</h3>
+                            <p>Menu Items</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3 class="counter" data-target="100">0</h3>
+                            <p>% Passion</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
     <section id="contact" class="section-padding contact-section">
+        <div class="shape shape-3"></div>
+        <div class="shape shape-4"></div>
+        <i class="fas fa-coffee anim-cup c4"></i>
+        <i class="fas fa-mug-hot anim-cup c5"></i>
+        
         <div class="container">
-            <div class="contact-wrapper">
-                <div class="contact-details">
-                    <h3>Visit Us</h3>
-                    <div class="contact-item">
-                        <i class="fas fa-map-marker-alt"></i>
-                        <div>
-                            <strong>Location</strong>
-                            <p>San Antonio Road, Purok Dayat, San Antonio, Guagua, Pampanga, Philippines</p>
+            <div class="section-header reveal">
+                <span class="section-tag">Reach Out</span>
+                <h2 class="section-title">Let's Connect</h2>
+                <p class="section-subtitle">Have a question or want to reserve a table? Drop us a message or visit us in person. We're always happy to welcome you.</p>
+            </div>
+            
+            <div class="contact-wrapper reveal">
+                <div class="contact-info-panel" id="contactInfoCard">
+                    <div class="info-content">
+                        <h3>Contact Information</h3>
+                        <div class="info-item">
+                            <div class="info-icon"><i class="fas fa-map-marker-alt"></i></div>
+                            <div class="info-text">
+                                <h4>Location</h4>
+                                <p>San Antonio Road, Purok Dayat, San Antonio, Guagua</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="contact-item">
-                        <i class="fas fa-phone"></i>
-                        <div>
-                            <strong>Phone</strong>
-                            <p>0995 100 9209</p>
+                        <div class="info-item">
+                            <div class="info-icon"><i class="fas fa-phone"></i></div>
+                            <div class="info-text">
+                                <h4>Phone</h4>
+                                <p>0995 100 9209</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="contact-item">
-                        <i class="fas fa-envelope"></i>
-                        <div>
-                            <strong>Email</strong>
-                            <p>emmanuel.cafegallery@gmail.com</p>
+                        <div class="info-item">
+                            <div class="info-icon"><i class="fas fa-envelope"></i></div>
+                            <div class="info-text">
+                                <h4>Email</h4>
+                                <p>emmanuel.cafegallery@gmail.com</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="hours-box">
-                        <h4 style="color:white; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:10px;">Opening Hours</h4>
-                        <div class="hours-row"><span>Monday - Thursday</span> <span>10:00 AM - 11:00 PM</span></div>
-                        <div class="hours-row"><span>Friday - Sunday</span> <span>10:00 AM - 12:00 MN</span></div>
+                        
+                        <div style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: var(--radius-md); margin-top: 3rem; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(5px);">
+                            <h4 style="margin-bottom:1rem; color:var(--accent); font-family:var(--font-heading); font-size:1.2rem;"><i class="fas fa-clock"></i> Operating Hours</h4>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px;"><span>Mon - Thu</span> <span>10:00 AM - 11:00 PM</span></div>
+                            <div style="display:flex; justify-content:space-between; padding-top:5px;"><span>Fri - Sun</span> <span>10:00 AM - 12:00 MN</span></div>
+                        </div>
                     </div>
                 </div>
-                <div class="map-container">
-                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3851.6441551049283!2d120.61334867490074!3d14.973415985558917!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x339659f8a002829d%3A0xc3f1f3e070d6556e!2sCafe%20Emmanuel!5e0!3m2!1sen!2sph!4v1709400000000!5m2!1sen!2sph" width="600" height="450" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+
+                <div class="contact-form-panel">
+                    <h3 style="font-family:var(--font-heading); font-size:2rem; margin-bottom: 2rem; color:var(--secondary);">Send a Message</h3>
+                    <?php if(isset($_GET['status']) && $_GET['status'] == 'success'): ?>
+                        <div style="padding:15px; background:#d4edda; color:#155724; border-radius:var(--radius-sm); margin-bottom:20px; font-weight:500;"><i class="fas fa-check-circle"></i> Message sent successfully!</div>
+                    <?php endif; ?>
+                    <form action="submit_inquiry.php" method="POST">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <input type="text" name="fname" id="fname" class="form-control" placeholder=" " required>
+                                <label for="fname" class="form-label">First Name</label>
+                            </div>
+                            <div class="form-group">
+                                <input type="text" name="lname" id="lname" class="form-control" placeholder=" " required>
+                                <label for="lname" class="form-label">Last Name</label>
+                            </div>
+                            <div class="form-group full">
+                                <input type="email" name="email" id="email" class="form-control" placeholder=" " required>
+                                <label for="email" class="form-label">Email Address</label>
+                            </div>
+                            <div class="form-group full">
+                                <textarea name="message" id="message" class="form-control" placeholder=" " required></textarea>
+                                <label for="message" class="form-label">How can we help you?</label>
+                            </div>
+                            <div class="form-group full">
+                                <button type="submit" class="btn btn-primary" style="width:100%;">Send Message <i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -671,10 +829,10 @@ if (empty($hero_slides)) {
 
     <footer class="footer">
         <div class="container">
-            <div class="footer-content">
+            <div class="footer-content reveal">
                 <div class="footer-brand">
-                    <h3><span style="color:var(--primary-color);">C</span>afe Emmanuel</h3>
-                    <p>Your neighborhood destination for exceptional coffee, delicious food, and warm hospitality.</p>
+                    <img src="Logo_Brand.png" alt="Cafe Emmanuel">
+                    <p>Where every cup tells a story, and every bite is a masterpiece. Join us in celebrating the art of coffee and community.</p>
                     <div class="socials">
                         <a href="https://www.facebook.com/profile.php?id=61574968445731" class="social-link"><i class="fab fa-facebook-f"></i></a>
                         <a href="https://www.instagram.com/cafeemmanuelph/" class="social-link"><i class="fab fa-instagram"></i></a>
@@ -684,294 +842,380 @@ if (empty($hero_slides)) {
                     <h4>Quick Links</h4>
                     <ul class="footer-links">
                         <li><a href="#home">Home</a></li>
-                        <li><a href="product.php">Menu</a></li>
+                        <li><a href="#menu">Menu</a></li>
                         <li><a href="#about">About Us</a></li>
-                        <li><a href="contact.php">Contact</a></li>
+                        <li><a href="#contact">Contact</a></li>
                     </ul>
                 </div>
                 <div class="footer-col">
-                    <h4>Contact Info</h4>
+                    <h4>Find Us</h4>
                     <ul class="footer-links">
-                        <li><i class="fas fa-map-marker-alt" style="margin-right:8px; color:var(--primary-color);"></i> San Antonio Road, Purok Dayat, San Antonio, Guagua, Pampanga, Philippines</li>
-                        <li><i class="fas fa-phone" style="margin-right:8px; color:var(--primary-color);"></i> 0995 100 9209</li>
-                        <li><i class="fas fa-envelope" style="margin-right:8px; color:var(--primary-color);"></i> emmanuel.cafegallery@gmail.com</li>
+                        <li style="display:flex; gap:10px;"><i class="fas fa-map-marker-alt" style="color:var(--primary); margin-top:5px;"></i> San Antonio Road, Purok Dayat, San Antonio, Guagua</li>
+                        <li style="display:flex; gap:10px;"><i class="fas fa-phone" style="color:var(--primary); margin-top:5px;"></i> 0995 100 9209</li>
+                        <li style="display:flex; gap:10px;"><i class="fas fa-envelope" style="color:var(--primary); margin-top:5px;"></i> emmanuel.cafegallery@gmail.com</li>
                     </ul>
                 </div>
             </div>
-            <div class="copyright">
-                <p>© 2025 Cafe Emmanuel. All rights reserved.</p>
-            </div>
+            <div class="copyright"><p>© 2026 Cafe Emmanuel. Designed with passion. All rights reserved.</p></div>
         </div>
     </footer>
 
-    <div id="loginModal" class="modal-overlay" <?php if ($login_error) echo 'style="display:flex;"'; ?>>
+    <div id="loginModal" class="modal-overlay" <?php if ($login_error) echo 'style="display:flex; opacity:1;"'; ?>>
         <div class="modal-box">
-            <span class="modal-close" onclick="closeModal('loginModal')">×</span>
+            <span class="modal-close" onclick="closeModal('loginModal')">&times;</span>
             <h2 class="modal-title">Welcome Back</h2>
-            <?php if ($login_error): ?><p style="color: #dc3545; text-align: center; margin-bottom: 15px; font-size: 0.9rem;"><?php echo $login_error; ?></p><?php endif; ?>
+            <?php if ($login_error): ?><p style="color: var(--primary); text-align: center; margin-bottom: 15px; font-weight:500;"><i class="fas fa-exclamation-circle"></i> <?php echo $login_error; ?></p><?php endif; ?>
             <form method="POST" action="index.php">
                 <div class="input-group">
-                    <i class="fas fa-envelope input-icon"></i>
+                    <i class="fas fa-user input-icon"></i>
                     <input type="text" name="identifier" placeholder="Email or Username" class="input-field" required>
                 </div>
                 <div class="input-group">
                     <i class="fas fa-lock input-icon"></i>
                     <input type="password" name="password" placeholder="Password" class="input-field" required>
                 </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:20px; font-size:0.9rem; color:#666;">
-                    <label><input type="checkbox" name="remember"> Remember me</label>
-                    <a href="#" onclick="switchModal('loginModal', 'forgotPasswordModal')" class="link-highlight">Forgot Password?</a>
+                <div style="display:flex; justify-content:space-between; margin-bottom:20px; font-size:0.9rem;">
+                    <label style="color:var(--text-muted); cursor:pointer;"><input type="checkbox" name="remember" style="margin-right:5px; accent-color:var(--primary);"> Remember me</label>
+                    <a href="#" onclick="switchModal('loginModal', 'forgotPasswordModal')" class="link-highlight" style="color:var(--primary); font-weight:600;">Forgot Password?</a>
                 </div>
-                <button type="submit" name="login" class="modal-btn">Login</button>
+                <button type="submit" name="login" class="btn btn-primary" style="width:100%;">Sign In</button>
             </form>
-            <div class="modal-footer">
-                Don't have an account? <a href="#" onclick="switchModal('loginModal', 'registerModal')" class="link-highlight">Register</a>
+            <div style="text-align:center; margin-top:20px; font-size:0.95rem; color:var(--text-muted);">
+                Don't have an account? <a href="#" onclick="switchModal('loginModal', 'registerModal')" style="color:var(--primary); font-weight:600;">Register Here</a>
             </div>
         </div>
     </div>
 
-    <div id="registerModal" class="modal-overlay" <?php if ($register_error) echo 'style="display:flex;"'; ?>>
-        <div class="modal-box">
-            <span class="modal-close" onclick="closeModal('registerModal')">×</span>
-            <h2 class="modal-title">Create Account</h2>
-            <?php if ($register_error): ?><p style="color: #dc3545; text-align: center; margin-bottom: 10px; font-size: 0.9rem;"><?php echo $register_error; ?></p><?php endif; ?>
+    <div id="registerModal" class="modal-overlay" <?php if ($register_error) echo 'style="display:flex; opacity:1;"'; ?>>
+        <div class="modal-box" style="max-height: 90vh; overflow-y: auto;">
+            <span class="modal-close" onclick="closeModal('registerModal')">&times;</span>
+            <h2 class="modal-title">Join the Family</h2>
+            <?php if ($register_error): ?><p style="color: var(--primary); text-align: center; margin-bottom: 15px; font-weight:500;"><i class="fas fa-exclamation-circle"></i> <?php echo $register_error; ?></p><?php endif; ?>
             <form method="POST" action="index.php">
-                <div class="input-group">
-                    <i class="fas fa-user input-icon"></i>
-                    <input type="text" name="fullname" placeholder="Full Name" class="input-field" required minlength="8">
-                </div>
-                <div class="input-group">
-                    <i class="fas fa-at input-icon"></i>
-                    <input type="text" name="username" placeholder="Username" class="input-field" required minlength="4">
-                </div>
-                <div class="input-group">
-                    <i class="fas fa-envelope input-icon"></i>
-                    <input type="email" name="email" placeholder="Email Address" class="input-field" required>
-                </div>
-                <div class="input-group">
-                    <i class="fas fa-phone input-icon"></i>
-                    <input type="tel" name="contact" placeholder="Contact Number" class="input-field" pattern="[0-9]{10,15}">
-                </div>
+                <div class="input-group"><i class="fas fa-id-card input-icon"></i><input type="text" name="fullname" placeholder="Full Name" class="input-field" required></div>
+                <div class="input-group"><i class="fas fa-at input-icon"></i><input type="text" name="username" placeholder="Username" class="input-field" required></div>
+                <div class="input-group"><i class="fas fa-envelope input-icon"></i><input type="email" name="email" placeholder="Email Address" class="input-field" required></div>
+                <div class="input-group"><i class="fas fa-phone input-icon"></i><input type="tel" name="contact" placeholder="Contact Number" class="input-field"></div>
                 <div class="input-group">
                     <i class="fas fa-venus-mars input-icon"></i>
-                    <select name="gender" class="input-field" required style="-webkit-appearance: none;">
+                    <select name="gender" class="input-field" required style="-webkit-appearance: none; cursor:pointer;">
                         <option value="" disabled selected>Select Gender</option>
                         <option value="Male">Male</option>
                         <option value="Female">Female</option>
-                        <option value="Non-Binary">Non-Binary</option>
-                        <option value="Prefer not to say">Prefer not to say</option>
                     </select>
                 </div>
-                <div class="input-group">
-                    <i class="fas fa-lock input-icon"></i>
-                    <input type="password" name="password" placeholder="Password (Min 8 chars, 1 Uppercase)" class="input-field" required minlength="8" pattern="^(?=.*[A-Z]).{8,}$">
-                </div>
-                <div class="input-group">
-                    <i class="fas fa-check-circle input-icon"></i>
-                    <input type="password" name="confirm_password" placeholder="Confirm Password" class="input-field" required>
-                </div>
-                <button type="submit" name="register" class="modal-btn">Register</button>
+                <div class="input-group"><i class="fas fa-lock input-icon"></i><input type="password" name="password" placeholder="Password" class="input-field" required></div>
+                <div class="input-group"><i class="fas fa-check-double input-icon"></i><input type="password" name="confirm_password" placeholder="Confirm Password" class="input-field" required></div>
+                <button type="submit" name="register" class="btn btn-primary" style="width:100%;">Create Account</button>
             </form>
-            <div class="modal-footer">
-                Already have an account? <a href="#" onclick="switchModal('registerModal', 'loginModal')" class="link-highlight">Login</a>
+            <div style="text-align:center; margin-top:20px; font-size:0.95rem; color:var(--text-muted);">
+                Already have an account? <a href="#" onclick="switchModal('registerModal', 'loginModal')" style="color:var(--primary); font-weight:600;">Sign In</a>
             </div>
         </div>
     </div>
 
-    <div id="otpModal" class="modal-overlay" <?php if(isset($_SESSION['show_otp_modal']) && $_SESSION['show_otp_modal']): ?>style="display:flex;"<?php endif; ?>>
+    <div id="otpModal" class="modal-overlay" <?php if(isset($_SESSION['show_otp_modal']) && $_SESSION['show_otp_modal']): ?>style="display:flex; opacity:1;"<?php endif; ?>>
         <div class="modal-box">
-            <span class="modal-close" onclick="window.location.href='logout.php'">×</span>
-            <h2 class="modal-title">Verify Account</h2>
-            <p style="text-align: center; color: #666; margin-bottom: 1.5rem;">
-                We've sent a 6-digit code to <br><strong><?php echo htmlspecialchars($_SESSION['otp_email'] ?? ''); ?></strong>
-            </p>
-            <?php if (isset($_SESSION['otp_resent']) && $_SESSION['otp_resent']): unset($_SESSION['otp_resent']); ?>
-                <p style="color: #28a745; text-align: center; margin-bottom: 10px;">New code sent!</p>
-            <?php endif; ?>
-            <?php if ($otp_error): ?><p style="color: #dc3545; text-align: center; margin-bottom: 10px;"><?php echo $otp_error; ?></p><?php endif; ?>
+            <span class="modal-close" onclick="window.location.href='logout.php'">&times;</span>
+            <h2 class="modal-title">Verify Email</h2>
+            <p style="text-align:center; color:var(--text-muted); margin-bottom:1.5rem;">Enter the 6-digit code sent to<br><strong style="color:var(--secondary);"><?php echo htmlspecialchars($_SESSION['otp_email'] ?? ''); ?></strong></p>
+            <?php if ($otp_error): ?><p style="color: var(--primary); text-align: center; margin-bottom: 10px; font-weight:500;"><?php echo $otp_error; ?></p><?php endif; ?>
             <form method="POST" action="index.php">
                 <div class="input-group">
                     <i class="fas fa-key input-icon"></i>
-                    <input type="text" name="otp_code" placeholder="000000" class="input-field" required maxlength="6" pattern="[0-9]{6}" style="text-align: center; letter-spacing: 8px; font-size: 1.5rem; font-weight: 700;">
+                    <input type="text" name="otp_code" placeholder="------" class="input-field" required maxlength="6" style="text-align:center; letter-spacing:12px; font-size:1.8rem; font-weight:700; font-family:monospace;">
                 </div>
-                <button type="submit" name="verify_otp" class="modal-btn">Verify Code</button>
+                <button type="submit" name="verify_otp" class="btn btn-primary" style="width:100%;">Verify & Continue</button>
             </form>
-            <div style="text-align: center; margin-top: 20px; display: flex; justify-content: space-between; font-size: 0.9rem;">
-                <a href="resend_otp.php" class="link-highlight">Resend Code</a>
-                <a href="logout.php" style="color: #999;">Use different account</a>
-            </div>
         </div>
     </div>
 
     <div id="forgotPasswordModal" class="modal-overlay">
         <div class="modal-box">
-            <span class="modal-close" onclick="closeModal('forgotPasswordModal')">×</span>
+            <span class="modal-close" onclick="closeModal('forgotPasswordModal')">&times;</span>
             <h2 class="modal-title">Reset Password</h2>
-            <p style="text-align:center; color:#666; margin-bottom:20px;">Enter your email to receive a reset code.</p>
-            <div id="forgotPasswordMessage" style="display:none; padding:10px; border-radius:6px; margin-bottom:15px; font-size:0.9rem; text-align:center;"></div>
+            <p style="text-align:center; color:var(--text-muted); margin-bottom:20px;">Enter your email to receive a reset code.</p>
+            <div id="forgotPasswordMessage" style="display:none; padding:12px; border-radius:8px; margin-bottom:15px; font-size:0.9rem; text-align:center; font-weight:500;"></div>
             <form id="forgotPasswordForm">
-                <input type="hidden" name="resetMethod" value="email">
                 <div class="input-group">
                     <i class="fas fa-envelope input-icon"></i>
                     <input type="email" id="forgotEmail" placeholder="Enter your email address" class="input-field" required>
                 </div>
-                <button type="submit" class="modal-btn">Send Reset Code</button>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Send Reset Link</button>
             </form>
-            <div class="modal-footer">
-                Remember your password? <a href="#" onclick="switchModal('forgotPasswordModal', 'loginModal')" class="link-highlight">Login</a>
+            <div style="text-align:center; margin-top:20px; font-size:0.95rem; color:var(--text-muted);">
+                Remembered it? <a href="#" onclick="switchModal('forgotPasswordModal', 'loginModal')" style="color:var(--primary); font-weight:600;">Sign In</a>
             </div>
         </div>
     </div>
 
+    <script src="JS/product.js"></script> 
     <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            const slides = document.querySelectorAll(".hero-slide");
-            const textItems = document.querySelectorAll(".hero-text-item");
+        document.addEventListener("DOMContentLoaded", () => {
             
-            if (slides.length === 0) return;
+            // --- 1. Navbar Scroll Effect, Logo Auto-Resize & Background Parallax ---
+            const header = document.getElementById('navbar');
+            const sections = document.querySelectorAll('section');
+            const navLinks = document.querySelectorAll('.nav-menu a[href^="#"]');
+            const animCups = document.querySelectorAll('.anim-cup');
 
-            let currentIndex = 0;
-            let slideInterval;
-            const IMAGE_DURATION = 3000; // 3 seconds per image
-            const MAX_VIDEO_DURATION = 30000; // 30 seconds max for video
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 80) header.classList.add('scrolled');
+                else header.classList.remove('scrolled');
 
-            // Start sequence
-            showSlide(0);
+                let current = '';
+                sections.forEach(section => {
+                    const sectionTop = section.offsetTop;
+                    if (pageYOffset >= sectionTop - 200) current = section.getAttribute('id');
+                });
 
-            function showSlide(index) {
-                // Remove active classes
-                slides.forEach(s => s.classList.remove("active"));
-                textItems.forEach(t => t.classList.remove("active"));
+                navLinks.forEach(a => {
+                    a.classList.remove('active');
+                    if (a.getAttribute('href').includes(current)) a.classList.add('active');
+                });
                 
-                // Add active to current
-                slides[index].classList.add("active");
-                if (textItems[index]) textItems[index].classList.add("active");
-
-                const currentElement = slides[index];
-                const isVideo = currentElement.tagName === 'VIDEO';
-
-                // Clear any existing timers
-                clearTimeout(slideInterval);
-
-                if (isVideo) {
-                    currentElement.currentTime = 0;
-                    currentElement.muted = true; // Ensure autoplay
-                    currentElement.play().then(() => {
-                        // When video ends, go to next slide
-                        currentElement.onended = () => {
-                            nextSlide();
-                        };
-                    }).catch(error => {
-                        console.log("Autoplay prevented:", error);
-                        // Fallback if autoplay fails: treat as image
-                        slideInterval = setTimeout(nextSlide, IMAGE_DURATION);
-                    });
-
-                    // Safety fallback: if video is too long or stuck
-                    slideInterval = setTimeout(() => {
-                        if (currentIndex === index) nextSlide();
-                    }, MAX_VIDEO_DURATION);
-
-                } else {
-                    // Image Slide Logic
-                    slideInterval = setTimeout(nextSlide, IMAGE_DURATION);
-                }
-            }
-
-            function nextSlide() {
-                let nextIndex = currentIndex + 1;
-
-                // LOOP LOGIC:
-                // If we reach the end, go back to the FIRST IMAGE (Index 1)
-                // skipping the Intro Video (Index 0).
-                if (nextIndex >= slides.length) {
-                    const firstIsVideo = slides[0].tagName === 'VIDEO';
-                    if (firstIsVideo && slides.length > 1) {
-                        nextIndex = 1; // Skip video, loop images
-                    } else {
-                        nextIndex = 0; // Standard loop
-                    }
-                }
-
-                currentIndex = nextIndex;
-                showSlide(currentIndex);
-            }
-        });
-
-        // Modal & Navigation Logic (Preserved)
-        function openModal(modalId) {
-            document.getElementById(modalId).style.display = 'flex';
-        }
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-        function switchModal(fromId, toId) {
-            closeModal(fromId);
-            openModal(toId);
-        }
-        function switchTab(tabId, btn) {
-            document.querySelectorAll('.menu-grid').forEach(grid => grid.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            btn.classList.add('active');
-        }
-
-        const hamburger = document.querySelector('.hamburger');
-        const navMenu = document.querySelector('.nav-menu');
-        const mobileLinks = document.querySelectorAll('.mobile-link');
-        if(hamburger) {
-            hamburger.addEventListener('click', () => {
-                navMenu.classList.toggle('active');
-                mobileLinks.forEach(link => {
-                    link.style.display = navMenu.classList.contains('active') ? 'block' : 'none';
+                // Parallax effect for floating cups
+                animCups.forEach((cup, index) => {
+                    const speed = (index % 3 + 1) * 0.1;
+                    cup.style.transform = `translateY(${window.scrollY * speed}px)`;
                 });
             });
-        }
 
-        window.onclick = function(event) {
-            if (event.target.classList.contains('modal-overlay')) {
-                event.target.style.display = "none";
-            }
-        }
-        window.addEventListener('scroll', () => {
-            const header = document.querySelector('.header');
-            if (window.scrollY > 50) {
-                header.classList.add('scrolled');
-            } else {
-                header.classList.remove('scrolled');
-            }
-        });
+            // --- 2. Custom Intersection Observer (Reveal Animation) ---
+            const observerOptions = { threshold: 0.15, rootMargin: "0px 0px -50px 0px" };
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('active');
+                        if(entry.target.classList.contains('about-text') || entry.target.classList.contains('about-img-group')) {
+                            startCounters();
+                        }
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, observerOptions);
 
-        document.getElementById('forgotPasswordForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const email = document.getElementById('forgotEmail').value;
-            const msgBox = document.getElementById('forgotPasswordMessage');
-            msgBox.style.display = 'block';
-            msgBox.style.background = '#e2e8f0';
-            msgBox.style.color = '#333';
-            msgBox.textContent = 'Sending reset code...';
-            try {
-                const formData = new FormData();
-                formData.append('ajax', '1');
-                formData.append('send_reset_code', '1');
-                formData.append('identifier', email);
-                formData.append('reset_method', 'email');
-                const response = await fetch('forgot_password.php', { method: 'POST', body: formData });
-                const data = await response.json();
-                if (data.success) {
-                    msgBox.style.background = '#d4edda';
-                    msgBox.style.color = '#155724';
-                    msgBox.textContent = data.message + ' Redirecting...';
-                    setTimeout(() => { window.location.href = 'reset_password.php'; }, 2000);
-                } else {
-                    msgBox.style.background = '#f8d7da';
-                    msgBox.style.color = '#721c24';
-                    msgBox.textContent = data.message;
+            document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+            // --- 3. Hero Parallax, Typewriter Effect & Background Slider ---
+            const heroBg = document.getElementById('heroBgLayer');
+            window.addEventListener('scroll', () => {
+                let scrollVal = window.scrollY;
+                if (scrollVal < window.innerHeight && heroBg) {
+                    heroBg.style.transform = `translateY(${scrollVal * 0.4}px)`;
                 }
-            } catch (error) {
-                msgBox.textContent = 'An error occurred. Please try again.';
+            });
+
+            const text = "Welcome to Cafe Emmanuel";
+            const typeTargets = document.querySelectorAll('.typewriter-text-target');
+            
+            typeTargets.forEach(target => {
+                target.innerHTML = '';
+                let i = 0;
+                function typeWriter() {
+                    if (i < text.length) {
+                        if(text.substring(i, i+13) === "Cafe Emmanuel") {
+                            target.innerHTML += `<span class="highlight">Cafe Emmanuel</span>`;
+                            i += 13;
+                        } else {
+                            target.innerHTML += text.charAt(i);
+                            i++;
+                        }
+                        setTimeout(typeWriter, 80);
+                    }
+                }
+                setTimeout(typeWriter, 500); 
+            });
+
+            // HERO SLIDER LOGIC
+            const slides = document.querySelectorAll(".hero-slide");
+            const textItems = document.querySelectorAll(".hero-text-item");
+            if (slides.length > 1) {
+                let currentIndex = 0;
+                let slideInterval;
+                
+                function showSlide(index) {
+                    slides.forEach(s => s.classList.remove("active"));
+                    textItems.forEach(t => t.classList.remove("active"));
+                    
+                    slides[index].classList.add("active");
+                    if (textItems[index]) textItems[index].classList.add("active");
+
+                    const currentElement = slides[index];
+                    clearTimeout(slideInterval);
+
+                    if (currentElement.tagName === 'VIDEO') {
+                        currentElement.currentTime = 0;
+                        currentElement.muted = true;
+                        let playPromise = currentElement.play();
+                        
+                        if (playPromise !== undefined) {
+                            playPromise.then(_ => {
+                                currentElement.onended = nextSlide;
+                            }).catch(error => {
+                                slideInterval = setTimeout(nextSlide, 5000);
+                            });
+                        }
+                    } else {
+                        slideInterval = setTimeout(nextSlide, 5000);
+                    }
+                }
+                
+                function nextSlide() {
+                    currentIndex = (currentIndex + 1) % slides.length;
+                    showSlide(currentIndex);
+                }
+                
+                showSlide(0);
+            } else if (slides.length === 1 && slides[0].tagName === 'VIDEO') {
+                slides[0].loop = true;
+                slides[0].play().catch(e => console.log('Autoplay prevented.'));
+            }
+
+            // --- 4. Number Counter Animation ---
+            let countersStarted = false;
+            function startCounters() {
+                if(countersStarted) return;
+                countersStarted = true;
+                const counters = document.querySelectorAll('.counter');
+                const speed = 200; 
+                counters.forEach(counter => {
+                    const updateCount = () => {
+                        const target = +counter.getAttribute('data-target');
+                        const count = +counter.innerText;
+                        const inc = target / speed;
+                        if (count < target) {
+                            counter.innerText = Math.ceil(count + inc);
+                            setTimeout(updateCount, 20);
+                        } else {
+                            counter.innerText = target + (target > 50 ? '+' : '');
+                        }
+                    };
+                    updateCount();
+                });
+            }
+
+            // --- 5. Menu Filter & "Show More" Logic ---
+            const filterBtns = document.querySelectorAll('.filter-btn');
+            const menuCards = document.querySelectorAll('.menu-card');
+            const showMoreContainer = document.getElementById('showMoreContainer');
+            const showMoreBtn = document.getElementById('showMoreBtn');
+            
+            let visibleLimit = 6;
+            let currentFilter = 'all';
+
+            function updateMenuGrid() {
+                let matchedCount = 0;
+                let visibleCount = 0;
+
+                menuCards.forEach(card => {
+                    const categories = card.getAttribute('data-category');
+                    const matches = (currentFilter === 'all' || categories.includes(currentFilter));
+                    
+                    if (matches) {
+                        matchedCount++;
+                        if (visibleCount < visibleLimit) {
+                            card.style.display = 'flex';
+                            setTimeout(() => { card.classList.remove('hide'); card.classList.add('show'); }, 50);
+                            visibleCount++;
+                        } else {
+                            card.classList.remove('show');
+                            card.classList.add('hide');
+                            setTimeout(() => { if(card.classList.contains('hide')) card.style.display = 'none'; }, 400); 
+                        }
+                    } else {
+                        card.classList.remove('show');
+                        card.classList.add('hide');
+                        setTimeout(() => { if(card.classList.contains('hide')) card.style.display = 'none'; }, 400); 
+                    }
+                });
+
+                if (matchedCount > visibleLimit) {
+                    showMoreContainer.style.display = 'block';
+                } else {
+                    showMoreContainer.style.display = 'none';
+                }
+            }
+
+            updateMenuGrid();
+
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    filterBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.getAttribute('data-filter');
+                    visibleLimit = 6;
+                    updateMenuGrid();
+                });
+            });
+
+            showMoreBtn.addEventListener('click', () => {
+                visibleLimit += 6;
+                updateMenuGrid();
+            });
+
+            // --- 6. 3D Tilt Effect for Contact Info Card ---
+            const tiltCard = document.getElementById('contactInfoCard');
+            if(tiltCard && window.innerWidth > 992) {
+                tiltCard.addEventListener('mousemove', (e) => {
+                    const rect = tiltCard.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const centerX = rect.width / 2;
+                    const centerY = rect.height / 2;
+                    
+                    const rotateX = ((y - centerY) / centerY) * -10;
+                    const rotateY = ((x - centerX) / centerX) * 10;
+                    
+                    tiltCard.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+                    tiltCard.style.transition = 'none';
+                });
+                tiltCard.addEventListener('mouseleave', () => {
+                    tiltCard.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg)`;
+                    tiltCard.style.transition = 'transform 0.5s ease';
+                });
+            }
+
+            // --- 7. Modals & Hamburger Logic ---
+            const hamburger = document.getElementById('hamburger');
+            const navMenu = document.querySelector('.nav-menu');
+            if(hamburger) {
+                hamburger.addEventListener('click', () => {
+                    navMenu.classList.toggle('active');
+                    hamburger.classList.toggle('active');
+                });
             }
         });
+
+        // Global Modal Functions
+        function openModal(id) { 
+            const modal = document.getElementById(id);
+            modal.style.display = 'flex';
+            setTimeout(() => modal.classList.add('show'), 10);
+        }
+        function closeModal(id) { 
+            const modal = document.getElementById(id);
+            modal.classList.remove('show');
+            setTimeout(() => modal.style.display = 'none', 300);
+        }
+        function switchModal(from, to) { closeModal(from); setTimeout(() => openModal(to), 300); }
+        window.onclick = e => { if (e.target.classList.contains('modal-overlay')) closeModal(e.target.id); }
+
+        // Helper for View Product
+        function viewProduct(productData) {
+            localStorage.setItem('selectedProduct', JSON.stringify(productData));
+            window.location.href = 'quantity.php';
+        }
+
+        // Helper for Price update in Menu Card
+        function updatePrice(selectElem) {
+            const selectedOpt = selectElem.options[selectElem.selectedIndex];
+            const price = selectedOpt.getAttribute('data-price');
+            const cardFooter = selectElem.closest('.card-footer');
+            cardFooter.querySelector('.price').innerHTML = '₱' + parseFloat(price).toFixed(2);
+            const btn = cardFooter.querySelector('.add-cart-btn');
+            if(btn) { btn.setAttribute('data-price', price); btn.setAttribute('data-size', selectedOpt.value); }
+        }
     </script>
 </body>
 </html>
