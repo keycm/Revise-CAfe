@@ -1,50 +1,78 @@
 <?php
-include 'session_check.php';
-include 'db_connect.php';
+try {
+    include 'session_check.php';
+    include 'db_connect.php';
 
-// --- ACCESS CONTROL FIX ---
-// Allow both 'admin' and 'super_admin' to access this page
-if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['admin', 'super_admin'])) {
-    header("Location: Dashboard.php");
-    exit();
-}
-
-// --- DATA FOR HEADER ICONS ---
-$unread_inquiries = 0;
-$inquiry_count_result = $conn->query("SELECT COUNT(*) as count FROM inquiries WHERE status = 'new'");
-if ($inquiry_count_result) {
-    $unread_inquiries = $inquiry_count_result->fetch_assoc()['count'];
-}
-
-$recent_messages = [];
-$recent_inquiries_result = $conn->query("SELECT * FROM inquiries WHERE status = 'new' ORDER BY received_at DESC LIMIT 5");
-if ($recent_inquiries_result) {
-    while ($row = $recent_inquiries_result->fetch_assoc()) {
-        $recent_messages[] = $row;
+    // --- ACCESS CONTROL FIX ---
+    // Allow both 'admin' and 'super_admin' to access this page
+    if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['admin', 'super_admin'])) {
+        header("Location: Dashboard.php");
+        exit();
     }
-}
 
-// --- DATA FETCHING WITH CRASH PROTECTION ---
+    // Isolate connection for local use to avoid conflicts with later includes (like config.php in sidebar)
+    $local_conn = $conn;
 
-// 1. Fetch Deleted Orders
-$orders_sql = "SELECT * FROM recently_deleted ORDER BY deleted_at DESC";
-$deleted_orders = $conn->query($orders_sql);
-if (!$deleted_orders) {
-    $orders_error = $conn->error;
-}
+    // --- DATA FOR HEADER ICONS ---
+    $unread_inquiries = 0;
+    $inquiry_count_result = $local_conn->query("SELECT COUNT(*) as count FROM inquiries WHERE status = 'new'");
+    if ($inquiry_count_result) {
+        $unread_inquiries = $inquiry_count_result->fetch_assoc()['count'];
+    }
 
-// 2. Fetch Deleted Products
-$products_sql = "SELECT * FROM recently_deleted_products ORDER BY deleted_at DESC";
-$deleted_products = $conn->query($products_sql);
-if (!$deleted_products) {
-    $products_error = $conn->error;
-}
+    $recent_messages = [];
+    $recent_inquiries_result = $local_conn->query("SELECT * FROM inquiries WHERE status = 'new' ORDER BY received_at DESC LIMIT 5");
+    if ($recent_inquiries_result) {
+        while ($row = $recent_inquiries_result->fetch_assoc()) {
+            $recent_messages[] = $row;
+        }
+    }
 
-// 3. Fetch Deleted Users
-$users_sql = "SELECT * FROM recently_deleted_users ORDER BY deleted_at DESC";
-$deleted_users = $conn->query($users_sql);
-if (!$deleted_users) {
-    $users_error = $conn->error;
+    // --- HELPER FUNCTION FOR ROBUST QUERYING ---
+    function fetch_deleted_data($conn, $table) {
+        // Check if table exists
+        $check = $conn->query("SHOW TABLES LIKE '$table'");
+        if (!$check || $check->num_rows == 0) return null;
+
+        // Check for 'deleted_at' column
+        $cols = $conn->query("SHOW COLUMNS FROM `$table` LIKE 'deleted_at'");
+        $order_col = ($cols && $cols->num_rows > 0) ? 'deleted_at' : 'id';
+
+        // Check for 'id' column as fallback for ordering
+        if ($order_col === 'id') {
+            $cols_id = $conn->query("SHOW COLUMNS FROM `$table` LIKE 'id'");
+            if (!$cols_id || $cols_id->num_rows == 0) {
+                // If neither deleted_at nor id exists, just select without order
+                return $conn->query("SELECT * FROM `$table` LIMIT 50");
+            }
+        }
+
+        $sql = "SELECT * FROM `$table` ORDER BY `$order_col` DESC LIMIT 50";
+        return $conn->query($sql);
+    }
+
+    // --- DATA FETCHING WITH CRASH PROTECTION ---
+
+    // 1. Fetch Deleted Orders
+    $deleted_orders = fetch_deleted_data($local_conn, 'recently_deleted');
+    if (!$deleted_orders) {
+        $orders_error = $local_conn->error;
+    }
+
+    // 2. Fetch Deleted Products
+    $deleted_products = fetch_deleted_data($local_conn, 'recently_deleted_products');
+    if (!$deleted_products) {
+        $products_error = $local_conn->error;
+    }
+
+    // 3. Fetch Deleted Users
+    $deleted_users = fetch_deleted_data($local_conn, 'recently_deleted_users');
+    if (!$deleted_users) {
+        $users_error = $local_conn->error;
+    }
+
+} catch (Throwable $e) {
+    die("Error initializing page: " . htmlspecialchars($e->getMessage()));
 }
 ?>
 <!DOCTYPE html>
@@ -81,22 +109,22 @@ if (!$deleted_users) {
         }
 
         /* --- LAYOUT FIX --- */
-        .main-content { 
+        .main-content {
             flex-grow: 1;
             margin-left: 260px;
-            width: calc(100% - 260px); 
+            width: calc(100% - 260px);
             height: 100vh;
             overflow-y: auto;
             padding: 40px;
         }
 
-        .main-header { 
+        .main-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
         }
-        
+
         .main-header h1 { font-family: var(--font-heading); font-size: 28px; font-weight: 700; }
 
         /* --- HEADER ICONS --- */
@@ -165,14 +193,14 @@ if (!$deleted_users) {
         }
         td { padding: 15px; border-bottom: 1px solid var(--border-color); font-size: 14px; vertical-align: middle; }
         tr:hover { background-color: #fcfcfc; }
-        
+
         .empty-state { padding: 20px; text-align: center; color: var(--text-muted); font-style: italic; }
         .error-state { padding: 20px; color: var(--primary-red); background: #fff0f0; border-radius: 8px; margin-bottom: 15px; }
 
         /* --- ACTION BUTTONS --- */
         .action-icons { display: flex; gap: 8px; }
-        .btn-icon { 
-            width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; 
+        .btn-icon {
+            width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
             border: 1px solid var(--border-color); background: white; cursor: pointer; transition: 0.2s; color: var(--text-muted);
             text-decoration: none;
         }
@@ -221,7 +249,14 @@ if (!$deleted_users) {
                         <?php endif; ?>
                     </div>
                 </div>
-                <div class="icon-container" id="notificationBell"><i class="fas fa-bell"></i></div>
+
+                <div class="icon-container" id="notificationBell">
+                    <i class="fas fa-bell"></i>
+                    <div class="dropdown-menu" id="notificationDropdown">
+                        <div class="dropdown-item">No new notifications</div>
+                    </div>
+                </div>
+
                 <div class="icon-container" id="profileIcon" style="border:none;">
                     <img src="logo.png" alt="Admin">
                     <div class="dropdown-menu" id="profileDropdown" style="width:150px;">
@@ -241,7 +276,7 @@ if (!$deleted_users) {
             <div id="orders" class="tab-content active">
                 <?php if (isset($orders_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -255,23 +290,35 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_orders->num_rows > 0): ?>
+                            <?php if ($deleted_orders && $deleted_orders->num_rows > 0): ?>
                                 <?php while($row = $deleted_orders->fetch_assoc()): ?>
                                 <tr>
-                                    <td>#<?php echo str_pad($row['order_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                                    <td><strong><?php echo htmlspecialchars($row['fullname']); ?></strong></td>
-                                    <td style="color:var(--primary-red); font-weight:700;">₱<?php echo number_format($row['total'], 2); ?></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td>#<?php echo str_pad($row['order_id'] ?? $row['id'] ?? 0, 4, '0', STR_PAD_LEFT); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['fullname'] ?? 'Unknown'); ?></strong></td>
+                                    <td style="color:var(--primary-red); font-weight:700;">₱<?php echo number_format($row['total'] ?? 0, 2); ?></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="restore_delete.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="recently_deleted_action.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Permanent delete cannot be undone. Proceed?');"><i class="fas fa-trash"></i></a>
+                                            <form action="restore_delete.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="restore_delete.php" method="POST" style="display:inline;" onsubmit="return confirm('Permanent delete cannot be undone. Proceed?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_orders): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted orders found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load orders.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -281,7 +328,7 @@ if (!$deleted_users) {
             <div id="products" class="tab-content">
                 <?php if (isset($products_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_products' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_products' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -295,23 +342,35 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_products->num_rows > 0): ?>
+                            <?php if ($deleted_products && $deleted_products->num_rows > 0): ?>
                                 <?php while($row = $deleted_products->fetch_assoc()): ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                    <td>₱<?php echo number_format($row['price'], 2); ?></td>
-                                    <td><span style="font-size:11px; background:#eee; padding:2px 8px; border-radius:4px;"><?php echo htmlspecialchars($row['category']); ?></span></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['name'] ?? 'Unknown'); ?></strong></td>
+                                    <td>₱<?php echo number_format($row['price'] ?? 0, 2); ?></td>
+                                    <td><span style="font-size:11px; background:#eee; padding:2px 8px; border-radius:4px;"><?php echo htmlspecialchars($row['category'] ?? 'Uncategorized'); ?></span></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="restore_delete_product.php?id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="product_actions.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Delete product permanently?');"><i class="fas fa-trash"></i></a>
+                                            <form action="restore_delete_product.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="restore_delete_product.php" method="POST" style="display:inline;" onsubmit="return confirm('Delete product permanently?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_products): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted products found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load products.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -321,7 +380,7 @@ if (!$deleted_users) {
             <div id="users" class="tab-content">
                 <?php if (isset($users_error)): ?>
                     <div class="error-state">
-                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_users' not found.
+                        <i class="fas fa-exclamation-triangle"></i> Error: Table 'recently_deleted_users' not found or connection failed.
                     </div>
                 <?php else: ?>
                     <table>
@@ -335,23 +394,35 @@ if (!$deleted_users) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($deleted_users->num_rows > 0): ?>
+                            <?php if ($deleted_users && $deleted_users->num_rows > 0): ?>
                                 <?php while($row = $deleted_users->fetch_assoc()): ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($row['fullname']); ?></strong></td>
-                                    <td style="color:var(--text-muted);"><?php echo htmlspecialchars($row['email']); ?></td>
-                                    <td><span style="font-size:11px; text-transform:uppercase; font-weight:700;"><?php echo $row['role']; ?></span></td>
-                                    <td style="font-size:12px; color:var(--text-muted);"><?php echo date("M d, Y", strtotime($row['deleted_at'])); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($row['fullname'] ?? 'Unknown'); ?></strong></td>
+                                    <td style="color:var(--text-muted);"><?php echo htmlspecialchars($row['email'] ?? 'Unknown'); ?></td>
+                                    <td><span style="font-size:11px; text-transform:uppercase; font-weight:700;"><?php echo $row['role'] ?? 'User'; ?></span></td>
+                                    <td style="font-size:12px; color:var(--text-muted);">
+                                        <?php echo isset($row['deleted_at']) ? date("M d, Y", strtotime($row['deleted_at'])) : 'N/A'; ?>
+                                    </td>
                                     <td>
                                         <div class="action-icons">
-                                            <a href="user_restore_actions.php?action=restore&id=<?php echo $row['id']; ?>" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></a>
-                                            <a href="user_restore_actions.php?action=permanent_delete&id=<?php echo $row['id']; ?>" class="btn-icon delete" title="Delete Permanently" onclick="return confirm('Delete user account permanently?');"><i class="fas fa-trash"></i></a>
+                                            <form action="user_restore_actions.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="restore">
+                                                <button type="submit" class="btn-icon restore" title="Restore"><i class="fas fa-undo"></i></button>
+                                            </form>
+                                            <form action="user_restore_actions.php" method="POST" style="display:inline;" onsubmit="return confirm('Delete user account permanently?');">
+                                                <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                                <input type="hidden" name="action" value="permanent_delete">
+                                                <button type="submit" class="btn-icon delete" title="Delete Permanently"><i class="fas fa-trash"></i></button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
                                 <?php endwhile; ?>
-                            <?php else: ?>
+                            <?php elseif ($deleted_users): ?>
                                 <tr><td colspan="5" class="empty-state">No deleted users found.</td></tr>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="error-state">Failed to load users.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
